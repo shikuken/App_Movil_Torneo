@@ -7,10 +7,12 @@ import {
   TouchableOpacity,
   ImageBackground,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -82,10 +84,15 @@ export default function CrearTorneoScreen() {
       <View style={styles.overlay}>
         <SafeAreaView style={styles.safeArea}>
           <StatusBar barStyle="light-content" />
-
-          <ScrollView
-            contentContainerStyle={styles.scrollContainer}
-            showsVerticalScrollIndicator={false}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.keyboardView}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
+            <ScrollView
+              contentContainerStyle={styles.scrollContainer}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}>
             
             {/* Botón para regresar a la página principal */}
             <TouchableOpacity
@@ -216,7 +223,8 @@ export default function CrearTorneoScreen() {
               </TouchableOpacity>
 
             </View>
-          </ScrollView>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -236,12 +244,14 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
+  keyboardView: {
+    flex: 1,
+  },
   scrollContainer: {
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 32,
-    justifyContent: 'center',
+    paddingBottom: 100,
     alignItems: 'stretch',
   },
   backButton: {

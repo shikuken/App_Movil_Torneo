@@ -18,7 +18,23 @@ export default function HomeScreen() {
 
   // Función para manejar el clic en el perfil de usuario
   const handleProfilePress = () => {
-    Alert.alert('perfil de usuario');
+    Alert.alert(
+      'Perfil de usuario',
+      'Sesión activa en Smash Match.\n¿Deseas cerrar tu sesión actual?',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Cerrar sesión',
+          style: 'destructive',
+          onPress: () => {
+            router.replace('/login');
+          },
+        },
+      ]
+    );
   };
 
   // Función para manejar los clics de las opciones del menú
