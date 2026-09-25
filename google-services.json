@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "734169789196",
+    "project_id": "smash-match-ee78b",
+    "storage_bucket": "smash-match-ee78b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:734169789196:android:31c260ef8bd3bf7918cf29",
+        "android_client_info": {
+          "package_name": "com.tab000.smashmatch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCN8LiyUQDgOnaPylCT4vCGCh0cvbDNfJ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -11,20 +11,36 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../firebaseConfig';
 
 export default function LoginScreen() {
   const router = useRouter();
 
-  const [correo, setCorreo] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  // Compatibilidad con navegación solicitada: navigation.navigate('Register')
+  const navigation = {
+    navigate: (screen: string) => {
+      if (screen === 'Register' || screen === 'registro') {
+        router.push('/registro');
+      } else {
+        router.push(screen as any);
+      }
+    },
+  };
 
-  const handleLogin = () => {
-    const emailTrimmed = correo.trim();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [cargando, setCargando] = useState(false);
+
+  const handleLogin = async () => {
+    const emailTrimmed = email.trim();
     const passTrimmed = password.trim();
 
     if (!emailTrimmed || !passTrimmed) {
@@ -44,15 +60,18 @@ export default function LoginScreen() {
       return;
     }
 
-    // Inicio de sesión exitoso simulado y redirección a la página principal
-    Alert.alert('¡Bienvenido!', 'Has iniciado sesión con éxito en Smash Match.', [
-      {
-        text: 'Continuar',
-        onPress: () => {
-          router.replace('/(tabs)');
-        },
-      },
-    ]);
+    setCargando(true);
+    setError('');
+
+    try {
+      await signInWithEmailAndPassword(auth, emailTrimmed, passTrimmed);
+      router.replace('/(tabs)');
+    } catch (err: any) {
+      setError('Correo o contraseña incorrectos');
+      Alert.alert('Error de inicio de sesión', 'Correo o contraseña incorrectos');
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
@@ -91,6 +110,14 @@ export default function LoginScreen() {
                   Ingresa tus credenciales para acceder a tus torneos
                 </Text>
 
+                {/* Banner de error visible si ocurre una falla */}
+                {error ? (
+                  <View style={styles.errorBanner}>
+                    <Ionicons name="alert-circle" size={18} color="#ef4444" />
+                    <Text style={styles.errorBannerText}>{error}</Text>
+                  </View>
+                ) : null}
+
                 {/* Campo: Correo electrónico */}
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Correo electrónico</Text>
@@ -103,8 +130,11 @@ export default function LoginScreen() {
                       keyboardType="email-address"
                       autoCapitalize="none"
                       autoCorrect={false}
-                      value={correo}
-                      onChangeText={setCorreo}
+                      value={email}
+                      onChangeText={(val) => {
+                        setEmail(val);
+                        if (error) setError('');
+                      }}
                     />
                   </View>
                 </View>
@@ -120,7 +150,10 @@ export default function LoginScreen() {
                       placeholderTextColor="#94a3b8"
                       secureTextEntry={!showPassword}
                       value={password}
-                      onChangeText={setPassword}
+                      onChangeText={(val) => {
+                        setPassword(val);
+                        if (error) setError('');
+                      }}
                     />
                     <TouchableOpacity
                       onPress={() => setShowPassword(!showPassword)}
@@ -137,11 +170,18 @@ export default function LoginScreen() {
 
                 {/* Botón Principal: Iniciar Sesión */}
                 <TouchableOpacity
-                  style={styles.loginButton}
+                  style={[styles.loginButton, cargando && { opacity: 0.75 }]}
                   onPress={handleLogin}
-                  activeOpacity={0.85}>
-                  <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
-                  <Ionicons name="arrow-forward-circle" size={22} color="#ffffff" />
+                  activeOpacity={0.85}
+                  disabled={cargando}>
+                  {cargando ? (
+                    <ActivityIndicator color="#ffffff" size="small" />
+                  ) : (
+                    <>
+                      <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
+                      <Ionicons name="arrow-forward-circle" size={22} color="#ffffff" />
+                    </>
+                  )}
                 </TouchableOpacity>
 
                 {/* Divisor */}
@@ -151,11 +191,11 @@ export default function LoginScreen() {
                   <View style={styles.dividerLine} />
                 </View>
 
-                {/* Enlace para ir al Registro */}
+                {/* Enlace para ir al Registro utilizando navigation.navigate('Register') */}
                 <View style={styles.registerPrompt}>
                   <Text style={styles.promptText}>¿No tienes una cuenta? </Text>
                   <TouchableOpacity
-                    onPress={() => router.push('/registro')}
+                    onPress={() => navigation.navigate('Register')}
                     activeOpacity={0.7}>
                     <Text style={styles.registerLink}>Regístrate aquí</Text>
                   </TouchableOpacity>
@@ -245,7 +285,25 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textAlign: 'center',
     marginTop: 4,
-    marginBottom: 20,
+    marginBottom: 16,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef2f2',
+    borderColor: '#fca5a5',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+    gap: 8,
+  },
+  errorBannerText: {
+    color: '#b91c1c',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
   formGroup: {
     marginBottom: 16,

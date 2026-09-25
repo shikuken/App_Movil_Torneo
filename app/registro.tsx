@@ -11,10 +11,15 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { auth } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
 
 export default function RegistroScreen() {
   const router = useRouter();
@@ -23,9 +28,11 @@ export default function RegistroScreen() {
   const [nombre, setNombre] = useState('');
   const [apellido, setApellido] = useState('');
   const [telefono, setTelefono] = useState('');
-  const [correo, setCorreo] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [cargando, setCargando] = useState(false);
 
   // Sanitizado básico de teléfono (solo números y signo +)
   const handleTelefonoChange = (text: string) => {
@@ -33,15 +40,15 @@ export default function RegistroScreen() {
     setTelefono(cleaned);
   };
 
-  const handleRegistro = () => {
+  const handleRegistro = async () => {
     const nombreTrim = nombre.trim();
     const apellidoTrim = apellido.trim();
     const telefonoTrim = telefono.trim();
-    const correoTrim = correo.trim();
+    const emailTrim = email.trim();
     const passTrim = password.trim();
 
     // 1. Validar campos obligatorios
-    if (!nombreTrim || !apellidoTrim || !telefonoTrim || !correoTrim || !passTrim) {
+    if (!nombreTrim || !apellidoTrim || !telefonoTrim || !emailTrim || !passTrim) {
       Alert.alert(
         'Campos incompletos',
         'Por favor completa todos los campos requeridos: nombre, apellido, teléfono, correo electrónico y contraseña.'
@@ -51,7 +58,7 @@ export default function RegistroScreen() {
 
     // 2. Validación de formato de correo
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(correoTrim)) {
+    if (!emailRegex.test(emailTrim)) {
       Alert.alert('Correo inválido', 'Por favor ingresa un correo electrónico válido (ej: usuario@ejemplo.com).');
       return;
     }
@@ -68,19 +75,40 @@ export default function RegistroScreen() {
       return;
     }
 
-    // Registro exitoso y redirección directa a la página principal (index.tsx)
-    Alert.alert(
-      '¡Registro Exitoso!',
-      `¡Bienvenido a Smash Match, ${nombreTrim} ${apellidoTrim}! Tu cuenta ha sido creada correctamente.`,
-      [
-        {
-          text: 'Entrar a la aplicación',
-          onPress: () => {
-            router.replace('/(tabs)');
+    setCargando(true);
+    setError('');
+
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, emailTrim, passTrim);
+      const user = userCredential.user;
+
+      // Guardar el perfil completo del usuario en Cloud Firestore
+      await setDoc(doc(db, 'usuarios', user.uid), {
+        nombre: nombreTrim,
+        apellido: apellidoTrim,
+        telefono: telefonoTrim,
+        email: emailTrim,
+        creadoEn: new Date().toISOString(),
+      });
+
+      Alert.alert(
+        '¡Registro Exitoso!',
+        `¡Bienvenido a Smash Match, ${nombreTrim} ${apellidoTrim}! Tu cuenta ha sido creada correctamente en Firebase.`,
+        [
+          {
+            text: 'Entrar a la aplicación',
+            onPress: () => {
+              router.replace('/(tabs)');
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } catch (err: any) {
+      setError(err.message);
+      Alert.alert('Error al registrarse', err.message || 'No se pudo crear la cuenta.');
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
@@ -120,6 +148,14 @@ export default function RegistroScreen() {
                     Regístrate para competir y gestionar torneos
                   </Text>
                 </View>
+
+                {/* Banner de error visible si ocurre una falla */}
+                {error ? (
+                  <View style={styles.errorBanner}>
+                    <Ionicons name="alert-circle" size={18} color="#ef4444" />
+                    <Text style={styles.errorBannerText}>{error}</Text>
+                  </View>
+                ) : null}
 
                 {/* Campo 1: Nombre */}
                 <View style={styles.formGroup}>
@@ -181,8 +217,11 @@ export default function RegistroScreen() {
                       keyboardType="email-address"
                       autoCapitalize="none"
                       autoCorrect={false}
-                      value={correo}
-                      onChangeText={setCorreo}
+                      value={email}
+                      onChangeText={(val) => {
+                        setEmail(val);
+                        if (error) setError('');
+                      }}
                     />
                   </View>
                 </View>
@@ -198,7 +237,10 @@ export default function RegistroScreen() {
                       placeholderTextColor="#94a3b8"
                       secureTextEntry={!showPassword}
                       value={password}
-                      onChangeText={setPassword}
+                      onChangeText={(val) => {
+                        setPassword(val);
+                        if (error) setError('');
+                      }}
                     />
                     <TouchableOpacity
                       onPress={() => setShowPassword(!showPassword)}
@@ -215,11 +257,18 @@ export default function RegistroScreen() {
 
                 {/* Botón Principal: Registrarse */}
                 <TouchableOpacity
-                  style={styles.registerButton}
+                  style={[styles.registerButton, cargando && { opacity: 0.75 }]}
                   onPress={handleRegistro}
-                  activeOpacity={0.85}>
-                  <Text style={styles.registerButtonText}>Registrarse</Text>
-                  <Ionicons name="checkmark-circle" size={22} color="#ffffff" />
+                  activeOpacity={0.85}
+                  disabled={cargando}>
+                  {cargando ? (
+                    <ActivityIndicator color="#ffffff" size="small" />
+                  ) : (
+                    <>
+                      <Text style={styles.registerButtonText}>Registrarse</Text>
+                      <Ionicons name="checkmark-circle" size={22} color="#ffffff" />
+                    </>
+                  )}
                 </TouchableOpacity>
 
                 {/* Divisor */}
@@ -298,7 +347,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   headerTitleContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
     alignItems: 'center',
   },
   formTitle: {
@@ -313,6 +362,24 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textAlign: 'center',
     marginTop: 4,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef2f2',
+    borderColor: '#fca5a5',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+    gap: 8,
+  },
+  errorBannerText: {
+    color: '#b91c1c',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
   formGroup: {
     marginBottom: 14,

@@ -11,10 +11,14 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { auth } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
 
 export default function CrearTorneoScreen() {
   const router = useRouter();
@@ -24,6 +28,7 @@ export default function CrearTorneoScreen() {
   const [organizador, setOrganizador] = useState('');
   const [lugarSede, setLugarSede] = useState('');
   const [categoria, setCategoria] = useState('');
+  const [cargando, setCargando] = useState(false);
 
   // Estado para la opción de modalidad seleccionada
   const [modalidad, setModalidad] = useState<'Eliminación directa' | 'Todos contra todos'>(
@@ -37,7 +42,7 @@ export default function CrearTorneoScreen() {
   };
 
   // Manejo del botón de acción "Registrar jugadores"
-  const handleRegistrarJugadores = () => {
+  const handleRegistrarJugadores = async () => {
     if (!nombreTorneo.trim() || !organizador.trim()) {
       Alert.alert(
         'Campos incompletos',
@@ -46,22 +51,47 @@ export default function CrearTorneoScreen() {
       return;
     }
 
-    Alert.alert(
-      'Torneo registrado',
-      `¡El torneo "${nombreTorneo}" con modalidad "${modalidad}" ha sido creado con éxito! A continuación se abrirá el registro de jugadores.`,
-      [
-        {
-          text: 'Continuar',
-          onPress: () => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push('/');
-            }
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      Alert.alert('Sesión requerida', 'Por favor inicia sesión para crear un torneo.');
+      router.replace('/login');
+      return;
+    }
+
+    setCargando(true);
+    try {
+      await addDoc(collection(db, 'torneos'), {
+        usuarioId: currentUser.uid,
+        usuarioEmail: currentUser.email,
+        nombreTorneo: nombreTorneo.trim(),
+        organizador: organizador.trim(),
+        lugarSede: lugarSede.trim() || null,
+        categoria: categoria.trim() || null,
+        modalidad,
+        creadoEn: serverTimestamp(),
+      });
+
+      Alert.alert(
+        'Torneo registrado',
+        `¡El torneo "${nombreTorneo.trim()}" con modalidad "${modalidad}" ha sido creado con éxito en Firestore! A continuación se abrirá el registro de jugadores.`,
+        [
+          {
+            text: 'Continuar',
+            onPress: () => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.push('/');
+              }
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } catch (error: any) {
+      Alert.alert('Error al crear torneo', error.message || 'Ocurrió un error al guardar en la nube.');
+    } finally {
+      setCargando(false);
+    }
   };
 
   // Manejo del botón "Regresar a la página principal"
@@ -72,6 +102,7 @@ export default function CrearTorneoScreen() {
       router.push('/');
     }
   };
+
 
   return (
     <ImageBackground
@@ -215,11 +246,18 @@ export default function CrearTorneoScreen() {
 
               {/* Botón principal: Registrar jugadores */}
               <TouchableOpacity
-                style={styles.submitButton}
+                style={[styles.submitButton, cargando && { opacity: 0.75 }]}
                 onPress={handleRegistrarJugadores}
-                activeOpacity={0.85}>
-                <Text style={styles.submitButtonText}>Registrar jugadores</Text>
-                <Ionicons name="arrow-forward" size={22} color="#ffffff" />
+                activeOpacity={0.85}
+                disabled={cargando}>
+                {cargando ? (
+                  <ActivityIndicator color="#ffffff" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.submitButtonText}>Registrar jugadores</Text>
+                    <Ionicons name="arrow-forward" size={22} color="#ffffff" />
+                  </>
+                )}
               </TouchableOpacity>
 
             </View>
