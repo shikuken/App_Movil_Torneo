@@ -7,17 +7,30 @@ import {
   TouchableOpacity,
   Alert,
   ScrollView,
+  Platform,
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../../context/AuthContext';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
 
   // Función para manejar el clic en el perfil de usuario
   const handleProfilePress = () => {
+    if (Platform.OS === 'web') {
+      const confirmLogout = window.confirm('Sesión activa en Smash Match.\n¿Deseas cerrar tu sesión actual?');
+      if (confirmLogout) {
+        logout().then(() => {
+          router.replace('/login');
+        });
+      }
+      return;
+    }
+
     Alert.alert(
       'Perfil de usuario',
       'Sesión activa en Smash Match.\n¿Deseas cerrar tu sesión actual?',
@@ -29,7 +42,8 @@ export default function HomeScreen() {
         {
           text: 'Cerrar sesión',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            await logout();
             router.replace('/login');
           },
         },
@@ -41,6 +55,8 @@ export default function HomeScreen() {
   const handleMenuPress = (optionName: string) => {
     if (optionName === 'Crear torneo') {
       router.push('/crear-torneo');
+    } else if (optionName === 'Ver torneo' || optionName === 'Buscar torneo') {
+      router.push('/ver-torneos' as any);
     } else {
       Alert.alert(optionName, `Has seleccionado la opción "${optionName}".`);
     }
@@ -97,15 +113,15 @@ export default function HomeScreen() {
               <Text style={styles.buttonText}>Crear torneo</Text>
             </TouchableOpacity>
 
-            {/* Botón 2: Buscar torneo */}
+            {/* Botón 2: Ver torneo */}
             <TouchableOpacity
               style={styles.menuButton}
-              onPress={() => handleMenuPress('Buscar torneo')}
+              onPress={() => handleMenuPress('Ver torneo')}
               activeOpacity={0.8}>
               <View style={[styles.iconContainer, { backgroundColor: '#f0fdf4' }]}>
-                <Ionicons name="search-outline" size={30} color="#16a34a" />
+                <Ionicons name="eye-outline" size={30} color="#16a34a" />
               </View>
-              <Text style={styles.buttonText}>Buscar torneo</Text>
+              <Text style={styles.buttonText}>Ver torneo</Text>
             </TouchableOpacity>
 
             {/* Botón 3: Ver ranking de jugadores */}

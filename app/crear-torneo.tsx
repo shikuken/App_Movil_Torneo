@@ -44,23 +44,30 @@ export default function CrearTorneoScreen() {
   // Manejo del botón de acción "Registrar jugadores"
   const handleRegistrarJugadores = async () => {
     if (!nombreTorneo.trim() || !organizador.trim()) {
-      Alert.alert(
-        'Campos incompletos',
-        'Por favor completa la información del torneo (Nombre y Organizador) para continuar.'
-      );
+      const msg = 'Por favor completa la información del torneo (Nombre y Organizador) para continuar.';
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Campos incompletos', msg);
+      }
       return;
     }
 
     const currentUser = auth.currentUser;
     if (!currentUser) {
-      Alert.alert('Sesión requerida', 'Por favor inicia sesión para crear un torneo.');
+      const msg = 'Por favor inicia sesión para crear un torneo.';
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Sesión requerida', msg);
+      }
       router.replace('/login');
       return;
     }
 
     setCargando(true);
     try {
-      await addDoc(collection(db, 'torneos'), {
+      const docRef = await addDoc(collection(db, 'torneos'), {
         usuarioId: currentUser.uid,
         usuarioEmail: currentUser.email,
         nombreTorneo: nombreTorneo.trim(),
@@ -71,24 +78,23 @@ export default function CrearTorneoScreen() {
         creadoEn: serverTimestamp(),
       });
 
-      Alert.alert(
-        'Torneo registrado',
-        `¡El torneo "${nombreTorneo.trim()}" con modalidad "${modalidad}" ha sido creado con éxito en Firestore! A continuación se abrirá el registro de jugadores.`,
-        [
-          {
-            text: 'Continuar',
-            onPress: () => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.push('/');
-              }
-            },
-          },
-        ]
-      );
+      // Navegar inmediatamente a la vista para registrar jugadores del torneo creado
+      router.push({
+        pathname: '/registrar-jugadores' as any,
+        params: {
+          torneoId: docRef.id,
+          nombreTorneo: nombreTorneo.trim(),
+          modalidad,
+          esPropietario: 'true',
+        },
+      });
     } catch (error: any) {
-      Alert.alert('Error al crear torneo', error.message || 'Ocurrió un error al guardar en la nube.');
+      const errMsg = error.message || 'Ocurrió un error al guardar en la nube.';
+      if (Platform.OS === 'web') {
+        window.alert(`Error al crear torneo: ${errMsg}`);
+      } else {
+        Alert.alert('Error al crear torneo', errMsg);
+      }
     } finally {
       setCargando(false);
     }
