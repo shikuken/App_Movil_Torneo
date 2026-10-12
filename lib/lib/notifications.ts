@@ -57,7 +57,7 @@ export async function enviarNotificacionLocal(
         content: {
             title: '🏆 Torneo creado exitosamente',
             body: `El torneo "${nombreTorneo}" fue creado correctamente.`,
-            sound: 'default',
+            sound: true,
             data: {
                 url: '/',
             },

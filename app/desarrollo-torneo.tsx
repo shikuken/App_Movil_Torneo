@@ -36,6 +36,11 @@ interface JugadorInfo {
   club?: string;
 }
 
+interface SiguienteDestino {
+  numeroPartido: number;
+  posicionEnSiguiente: 1 | 2;
+}
+
 interface Partido {
   id: string;
   numeroPartido: number;
@@ -50,7 +55,13 @@ interface Partido {
   estado: 'pendiente' | 'en_juego' | 'finalizado';
   siguientePartidoNumero?: number | null;
   posicionEnSiguiente?: 1 | 2 | null;
+  /** Múltiples destinos hacia donde avanza el ganador (ej. Triangular Final) */
+  siguientesDestinos?: SiguienteDestino[] | null;
+  /** Flag para indicar que el partido forma parte de un Triangular Final */
+  esTriangular?: boolean;
 }
+
+
 
 interface PosicionJugador {
   id: string;
@@ -179,7 +190,10 @@ export default function DesarrolloTorneoScreen() {
             estado: d.estado || 'pendiente',
             siguientePartidoNumero: d.siguientePartidoNumero || null,
             posicionEnSiguiente: d.posicionEnSiguiente || null,
+            siguientesDestinos: d.siguientesDestinos || null,
+            esTriangular: d.esTriangular || false,
           });
+
         });
         setPartidos(list);
         setCargando(false);
@@ -192,7 +206,452 @@ export default function DesarrolloTorneoScreen() {
     return () => unsub();
   }, [torneoId]);
 
-  // Generar Fixture según modalidad
+  // ─────────────────────────────────────────────────────────────
+  //  UTILIDADES PARA LA GENERACIÓN DE FIXTURE
+  // ─────────────────────────────────────────────────────────────
+
+  /** Devuelve la siguiente potencia de 2 >= n */
+  const siguientePotenciaDe2 = (n: number): number => {
+    let p = 1;
+    while (p < n) p <<= 1;
+    return p;
+  };
+
+  /** Comprueba si n es exactamente una potencia de 2 */
+  const esPotenciaDe2 = (n: number): boolean => n > 0 && (n & (n - 1)) === 0;
+
+  /** Baraja un array in-place con Fisher-Yates */
+  const shuffle = <T,>(arr: T[]): T[] => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  /** Nombre de ronda según profundidad restante */
+  const nombreRonda = (totalRondas: number, rondaIdx: number): string => {
+    const restantes = totalRondas - rondaIdx;
+    if (restantes === 1) return 'Gran Final';
+    if (restantes === 2) return rondaIdx === 0 ? 'Semifinal' : `Semifinal ${rondaIdx}`;
+    if (restantes === 3) return `Cuartos de Final`;
+    if (restantes === 4) return `Octavos de Final`;
+    return `Ronda ${rondaIdx + 1}`;
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  GENERADOR PRINCIPAL DE FIXTURE (Eliminación Directa)
+  //  Maneja 3 casos:
+  //    A) N = potencia de 2 exacta   → llaves simétricas
+  //    B) N no potencia de 2, con byes → byes aleatorios (avance directo)
+  //    C) N no potencia de 2, sin byes → todos juegan R1, luego triangular si quedan 3
+  // ─────────────────────────────────────────────────────────────
+  const generarFixtureEliminacion = async (
+    jugadoresLista: JugadorInfo[],
+    allowByes: boolean = true
+  ) => {
+    const partidosRef = collection(db, 'torneos', torneoId, 'partidos');
+    const N = jugadoresLista.length;
+    const nextPow2 = siguientePotenciaDe2(N);
+    const numByes = nextPow2 - N;
+
+    // ── CASO A: Potencia de 2 perfecta ──────────────────────────
+    if (esPotenciaDe2(N)) {
+      await generarRondasSimetricas(jugadoresLista, partidosRef, 1);
+      return;
+    }
+
+    // ── CASO B: Byes aleatorios ──────────────────────────────────
+    if (allowByes) {
+      const mezclados = shuffle(jugadoresLista);
+      const conBye = mezclados.slice(0, numByes);
+      const sinBye = mezclados.slice(numByes);
+
+      const numPartidosR1 = sinBye.length / 2;
+      const offsetR2 = numPartidosR1 + 1;
+      const estructuraR2 = construirEstructura(nextPow2 / 2, offsetR2);
+
+      // Distribuir jugadores con bye y dejar null para ganadores de R1
+      const slotsR2: (JugadorInfo | null)[] = [
+        ...conBye,
+        ...Array(numPartidosR1).fill(null),
+      ];
+      const slotsR2Mezclados = shuffle(slotsR2);
+
+      estructuraR2[0].forEach((partido, idx) => {
+        partido.j1 = slotsR2Mezclados[idx * 2] ?? null;
+        partido.j2 = slotsR2Mezclados[idx * 2 + 1] ?? null;
+      });
+
+      // Partidos reales de R1
+      const partidosR1: {
+        num: number;
+        sig: number | null;
+        pos: 1 | 2 | null;
+        j1: JugadorInfo;
+        j2: JugadorInfo;
+      }[] = [];
+
+      let numPartido = 1;
+      for (let i = 0; i < sinBye.length; i += 2) {
+        partidosR1.push({
+          num: numPartido++,
+          sig: null,
+          pos: null,
+          j1: sinBye[i],
+          j2: sinBye[i + 1],
+        });
+      }
+
+      // Conectar cada partido de R1 con el slot null en R2
+      let r1Idx = 0;
+      for (const pR2 of estructuraR2[0]) {
+        if (pR2.j1 === null && r1Idx < partidosR1.length) {
+          partidosR1[r1Idx].sig = pR2.num;
+          partidosR1[r1Idx].pos = 1;
+          r1Idx++;
+        }
+        if (pR2.j2 === null && r1Idx < partidosR1.length) {
+          partidosR1[r1Idx].sig = pR2.num;
+          partidosR1[r1Idx].pos = 2;
+          r1Idx++;
+        }
+      }
+
+      // Escribir partidos R1 en Firestore
+      for (const p of partidosR1) {
+        const dest: SiguienteDestino[] = p.sig && p.pos ? [{ numeroPartido: p.sig, posicionEnSiguiente: p.pos }] : [];
+        await addDoc(partidosRef, {
+          numeroPartido: p.num,
+          ronda: 'Ronda 1',
+          jugador1: { id: p.j1.id, nombre: p.j1.nombre, club: p.j1.club || '' },
+          jugador2: { id: p.j2.id, nombre: p.j2.nombre, club: p.j2.club || '' },
+          marcador1: 0,
+          marcador2: 0,
+          puntosDetalle: '',
+          ganadorId: null,
+          ganadorNombre: null,
+          estado: 'pendiente',
+          siguientePartidoNumero: p.sig || null,
+          posicionEnSiguiente: p.pos || null,
+          siguientesDestinos: dest.length > 0 ? dest : null,
+          creadoEn: serverTimestamp(),
+        });
+      }
+
+      // Escribir rondas R2+ en Firestore
+      const rondasNombres = construirNombresRondas(estructuraR2.length);
+      for (let ri = 0; ri < estructuraR2.length; ri++) {
+        const rondaNom = rondasNombres[ri];
+        for (const p of estructuraR2[ri]) {
+          const dest: SiguienteDestino[] = p.sig && p.sigPos ? [{ numeroPartido: p.sig, posicionEnSiguiente: p.sigPos }] : [];
+          await addDoc(partidosRef, {
+            numeroPartido: p.num,
+            ronda: rondaNom,
+            jugador1: p.j1 ? { id: p.j1.id, nombre: p.j1.nombre, club: p.j1.club || '' } : null,
+            jugador2: p.j2 ? { id: p.j2.id, nombre: p.j2.nombre, club: p.j2.club || '' } : null,
+            marcador1: 0,
+            marcador2: 0,
+            puntosDetalle: '',
+            ganadorId: null,
+            ganadorNombre: null,
+            estado: 'pendiente',
+            siguientePartidoNumero: p.sig ?? null,
+            posicionEnSiguiente: p.sigPos ?? null,
+            siguientesDestinos: dest.length > 0 ? dest : null,
+            creadoEn: serverTimestamp(),
+          });
+        }
+      }
+      return;
+    }
+
+    // ── CASO C: Sin byes — todos juegan R1, posible Triangular Final ─
+    const mezclados = shuffle(jugadoresLista);
+    const ganadores_r1_count = Math.ceil(N / 2);
+    const esTriangular = ganadores_r1_count === 3;
+
+    if (esTriangular) {
+      // 6 jugadores -> 3 partidos en Ronda 1 (#1, #2, #3)
+      // Y 3 partidos en Triangular Final (#4, #5, #6)
+      const pTriangular1 = 4; // G1 vs G2
+      const pTriangular2 = 5; // G1 vs G3
+      const pTriangular3 = 6; // G2 vs G3
+
+      // Mapeo de destinos para cada ganador de Ronda 1:
+      // Ganador R1-1 (Partido 1) -> Partido 4 (jugador1) y Partido 5 (jugador1)
+      // Ganador R1-2 (Partido 2) -> Partido 4 (jugador2) y Partido 6 (jugador1)
+      // Ganador R1-3 (Partido 3) -> Partido 5 (jugador2) y Partido 6 (jugador2)
+      const destinosR1: SiguienteDestino[][] = [
+        [
+          { numeroPartido: pTriangular1, posicionEnSiguiente: 1 },
+          { numeroPartido: pTriangular2, posicionEnSiguiente: 1 },
+        ],
+        [
+          { numeroPartido: pTriangular1, posicionEnSiguiente: 2 },
+          { numeroPartido: pTriangular3, posicionEnSiguiente: 1 },
+        ],
+        [
+          { numeroPartido: pTriangular2, posicionEnSiguiente: 2 },
+          { numeroPartido: pTriangular3, posicionEnSiguiente: 2 },
+        ],
+      ];
+
+      // Escribir los 3 partidos de Ronda 1
+      for (let i = 0; i < 3; i++) {
+        const j1 = mezclados[i * 2];
+        const j2 = mezclados[i * 2 + 1];
+        await addDoc(partidosRef, {
+          numeroPartido: i + 1,
+          ronda: 'Ronda 1',
+          jugador1: { id: j1.id, nombre: j1.nombre, club: j1.club || '' },
+          jugador2: { id: j2.id, nombre: j2.nombre, club: j2.club || '' },
+          marcador1: 0,
+          marcador2: 0,
+          puntosDetalle: '',
+          ganadorId: null,
+          ganadorNombre: null,
+          estado: 'pendiente',
+          siguientePartidoNumero: destinosR1[i][0].numeroPartido,
+          posicionEnSiguiente: destinosR1[i][0].posicionEnSiguiente,
+          siguientesDestinos: destinosR1[i],
+          creadoEn: serverTimestamp(),
+        });
+      }
+
+      // Escribir los 3 partidos del Triangular Final
+      await addDoc(partidosRef, {
+        numeroPartido: pTriangular1,
+        ronda: 'Triangular Final',
+        jugador1: null,
+        jugador2: null,
+        marcador1: 0,
+        marcador2: 0,
+        puntosDetalle: '',
+        ganadorId: null,
+        ganadorNombre: null,
+        estado: 'pendiente',
+        siguientePartidoNumero: null,
+        posicionEnSiguiente: null,
+        siguientesDestinos: null,
+        esTriangular: true,
+        creadoEn: serverTimestamp(),
+      });
+
+      await addDoc(partidosRef, {
+        numeroPartido: pTriangular2,
+        ronda: 'Triangular Final',
+        jugador1: null,
+        jugador2: null,
+        marcador1: 0,
+        marcador2: 0,
+        puntosDetalle: '',
+        ganadorId: null,
+        ganadorNombre: null,
+        estado: 'pendiente',
+        siguientePartidoNumero: null,
+        posicionEnSiguiente: null,
+        siguientesDestinos: null,
+        esTriangular: true,
+        creadoEn: serverTimestamp(),
+      });
+
+      await addDoc(partidosRef, {
+        numeroPartido: pTriangular3,
+        ronda: 'Triangular Final',
+        jugador1: null,
+        jugador2: null,
+        marcador1: 0,
+        marcador2: 0,
+        puntosDetalle: '',
+        ganadorId: null,
+        ganadorNombre: null,
+        estado: 'pendiente',
+        siguientePartidoNumero: null,
+        posicionEnSiguiente: null,
+        siguientesDestinos: null,
+        esTriangular: true,
+        creadoEn: serverTimestamp(),
+      });
+      return;
+    } else {
+      // Caso normal sin byes (potencia de 2 o general)
+      const offsetR2 = ganadores_r1_count + 1;
+      const estructuraR2 = construirEstructura(ganadores_r1_count, offsetR2);
+      const rondasNombres = construirNombresRondas(estructuraR2.length);
+
+      let numPart = 1;
+      for (let i = 0; i < mezclados.length; i += 2) {
+        const j1 = mezclados[i];
+        const j2 = mezclados[i + 1] ?? null;
+        const partIdxR1 = Math.floor(i / 2);
+        const sigPartido = estructuraR2[0][Math.floor(partIdxR1 / 2)];
+        const sigNum = sigPartido?.num ?? null;
+        const sigPos = (partIdxR1 % 2 === 0 ? 1 : 2) as 1 | 2;
+        const dest: SiguienteDestino[] = sigNum ? [{ numeroPartido: sigNum, posicionEnSiguiente: sigPos }] : [];
+
+        await addDoc(partidosRef, {
+          numeroPartido: numPart++,
+          ronda: 'Ronda 1',
+          jugador1: { id: j1.id, nombre: j1.nombre, club: j1.club || '' },
+          jugador2: j2 ? { id: j2.id, nombre: j2.nombre, club: j2.club || '' } : null,
+          marcador1: 0,
+          marcador2: 0,
+          puntosDetalle: '',
+          ganadorId: !j2 ? j1.id : null,
+          ganadorNombre: !j2 ? j1.nombre : null,
+          estado: !j2 ? 'finalizado' : 'pendiente',
+          siguientePartidoNumero: sigNum,
+          posicionEnSiguiente: sigPos,
+          siguientesDestinos: dest.length > 0 ? dest : null,
+          creadoEn: serverTimestamp(),
+        });
+      }
+
+      for (let ri = 0; ri < estructuraR2.length; ri++) {
+        const rondaNom = rondasNombres[ri];
+        for (const p of estructuraR2[ri]) {
+          const dest: SiguienteDestino[] = p.sig && p.sigPos ? [{ numeroPartido: p.sig, posicionEnSiguiente: p.sigPos }] : [];
+          await addDoc(partidosRef, {
+            numeroPartido: p.num,
+            ronda: rondaNom,
+            jugador1: p.j1 ? { id: p.j1.id, nombre: p.j1.nombre, club: p.j1.club || '' } : null,
+            jugador2: p.j2 ? { id: p.j2.id, nombre: p.j2.nombre, club: p.j2.club || '' } : null,
+            marcador1: 0,
+            marcador2: 0,
+            puntosDetalle: '',
+            ganadorId: null,
+            ganadorNombre: null,
+            estado: 'pendiente',
+            siguientePartidoNumero: p.sig ?? null,
+            posicionEnSiguiente: p.sigPos ?? null,
+            siguientesDestinos: dest.length > 0 ? dest : null,
+            creadoEn: serverTimestamp(),
+          });
+        }
+      }
+      return;
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  Genera bracket simétrico para N jugadores (N debe ser pot. de 2)
+  //  Devuelve el número del siguiente partido libre después de los generados
+  // ─────────────────────────────────────────────────────────────
+  const generarRondasSimetricas = async (
+    jugadoresLista: JugadorInfo[],
+    ref: ReturnType<typeof collection>,
+    offsetNum: number
+  ) => {
+    const N = jugadoresLista.length;
+    const estructura = construirEstructura(N, offsetNum);
+    const rondasNombres = construirNombresRondas(estructura.length);
+
+    // Asignar jugadores a la primera ronda
+    estructura[0].forEach((partido, idx) => {
+      partido.j1 = jugadoresLista[idx * 2] ?? null;
+      partido.j2 = jugadoresLista[idx * 2 + 1] ?? null;
+    });
+
+    for (let ri = 0; ri < estructura.length; ri++) {
+      const rondaNom = rondasNombres[ri];
+      for (const p of estructura[ri]) {
+        const dest: SiguienteDestino[] = p.sig && p.sigPos ? [{ numeroPartido: p.sig, posicionEnSiguiente: p.sigPos }] : [];
+        await addDoc(ref, {
+          numeroPartido: p.num,
+          ronda: rondaNom,
+          jugador1: p.j1 ? { id: p.j1.id, nombre: p.j1.nombre, club: p.j1.club || '' } : null,
+          jugador2: p.j2 ? { id: p.j2.id, nombre: p.j2.nombre, club: p.j2.club || '' } : null,
+          marcador1: 0,
+          marcador2: 0,
+          puntosDetalle: '',
+          ganadorId: null,
+          ganadorNombre: null,
+          estado: 'pendiente',
+          siguientePartidoNumero: p.sig ?? null,
+          posicionEnSiguiente: p.sigPos ?? null,
+          siguientesDestinos: dest.length > 0 ? dest : null,
+          creadoEn: serverTimestamp(),
+        });
+      }
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  Construye la estructura de rondas para N participantes
+  //  Devuelve array de rondas, cada ronda con partidos numerados y enlaces
+  // ─────────────────────────────────────────────────────────────
+  type SlotPartido = {
+    num: number;
+    j1: JugadorInfo | null;
+    j2: JugadorInfo | null;
+    sig: number | null;
+    sigPos: 1 | 2 | null;
+    posLibre: number; // 1 o 2 → qué posición está vacía (para byes)
+  };
+
+  const construirEstructura = (N: number, offsetNum: number): SlotPartido[][] => {
+    const totalRondas = Math.ceil(Math.log2(N));
+    const rondas: SlotPartido[][] = [];
+    let contadorPartidos = offsetNum;
+
+    // Generar rondas de atrás hacia adelante para poder asignar vínculos
+    // Primero calculamos cuántos partidos hay en cada ronda
+    const partidosPorRonda: number[] = [];
+    let slots = N;
+    for (let r = 0; r < totalRondas; r++) {
+      partidosPorRonda.push(Math.floor(slots / 2));
+      slots = Math.ceil(slots / 2);
+    }
+
+    // Crear los partidos asignando números y vínculos
+    const rondasTemp: SlotPartido[][] = [];
+    for (let r = 0; r < totalRondas; r++) {
+      const rondaPartidos: SlotPartido[] = [];
+      for (let i = 0; i < partidosPorRonda[r]; i++) {
+        rondaPartidos.push({
+          num: contadorPartidos++,
+          j1: null,
+          j2: null,
+          sig: null,
+          sigPos: null,
+          posLibre: 0,
+        });
+      }
+      rondasTemp.push(rondaPartidos);
+    }
+
+    // Asignar vínculos: cada partido apunta al partido de la siguiente ronda
+    for (let r = 0; r < totalRondas - 1; r++) {
+      const siguienteRonda = rondasTemp[r + 1];
+      rondasTemp[r].forEach((partido, idx) => {
+        const sigPartido = siguienteRonda[Math.floor(idx / 2)];
+        partido.sig = sigPartido.num;
+        partido.sigPos = idx % 2 === 0 ? 1 : 2;
+      });
+    }
+
+    return rondasTemp;
+  };
+
+  /** Genera nombres de ronda del más general al más específico */
+  const construirNombresRondas = (totalRondas: number): string[] => {
+    const nombres: string[] = [];
+    for (let i = 0; i < totalRondas; i++) {
+      const restantes = totalRondas - i;
+      if (restantes === 1) nombres.push('Gran Final');
+      else if (restantes === 2) nombres.push('Semifinal');
+      else if (restantes === 3) nombres.push('Cuartos de Final');
+      else if (restantes === 4) nombres.push('Octavos de Final');
+      else nombres.push(`Ronda ${i + 1}`);
+    }
+    return nombres;
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  HANDLER PRINCIPAL — Detecta modalidad y delega
+  // ─────────────────────────────────────────────────────────────
   const handleGenerarFixture = async () => {
     if (jugadores.length < 2) {
       const msg = 'Se necesitan al menos 2 jugadores registrados para generar el fixture.';
@@ -203,14 +662,13 @@ export default function DesarrolloTorneoScreen() {
 
     setGenerando(true);
     try {
-      // Limpiar partidos existentes primero si los hubiera
+      // Limpiar partidos existentes
       const partidosRef = collection(db, 'torneos', torneoId, 'partidos');
       const snap = await getDocs(partidosRef);
-      const delPromises = snap.docs.map((d) => deleteDoc(d.ref));
-      await Promise.all(delPromises);
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
 
       if (torneo.modalidad === 'Todos contra todos') {
-        // Round Robin: cada jugador contra todos
+        // ── Round Robin ────────────────────────────────────────
         let numeroPartido = 1;
         const addPromises = [];
         for (let i = 0; i < jugadores.length; i++) {
@@ -219,16 +677,8 @@ export default function DesarrolloTorneoScreen() {
               addDoc(partidosRef, {
                 numeroPartido: numeroPartido++,
                 ronda: 'Todos contra todos',
-                jugador1: {
-                  id: jugadores[i].id,
-                  nombre: jugadores[i].nombre,
-                  club: jugadores[i].club || '',
-                },
-                jugador2: {
-                  id: jugadores[j].id,
-                  nombre: jugadores[j].nombre,
-                  club: jugadores[j].club || '',
-                },
+                jugador1: { id: jugadores[i].id, nombre: jugadores[i].nombre, club: jugadores[i].club || '' },
+                jugador2: { id: jugadores[j].id, nombre: jugadores[j].nombre, club: jugadores[j].club || '' },
                 marcador1: 0,
                 marcador2: 0,
                 puntosDetalle: '',
@@ -244,154 +694,13 @@ export default function DesarrolloTorneoScreen() {
         }
         await Promise.all(addPromises);
       } else {
-        // Eliminación Directa
-        const totalJugadores = jugadores.length;
-        if (totalJugadores === 2) {
-          // Solo la final
-          await addDoc(partidosRef, {
-            numeroPartido: 1,
-            ronda: 'Gran Final',
-            jugador1: { id: jugadores[0].id, nombre: jugadores[0].nombre, club: jugadores[0].club || '' },
-            jugador2: { id: jugadores[1].id, nombre: jugadores[1].nombre, club: jugadores[1].club || '' },
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: null,
-            ganadorNombre: null,
-            estado: 'pendiente',
-            siguientePartidoNumero: null,
-            posicionEnSiguiente: null,
-            creadoEn: serverTimestamp(),
-          });
-        } else if (totalJugadores <= 4) {
-          // Semifinales + Final (3 partidos)
-          await addDoc(partidosRef, {
-            numeroPartido: 1,
-            ronda: 'Semifinal 1',
-            jugador1: { id: jugadores[0].id, nombre: jugadores[0].nombre, club: jugadores[0].club || '' },
-            jugador2: { id: jugadores[1].id, nombre: jugadores[1].nombre, club: jugadores[1].club || '' },
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: null,
-            ganadorNombre: null,
-            estado: 'pendiente',
-            siguientePartidoNumero: 3,
-            posicionEnSiguiente: 1,
-            creadoEn: serverTimestamp(),
-          });
-
-          await addDoc(partidosRef, {
-            numeroPartido: 2,
-            ronda: 'Semifinal 2',
-            jugador1: { id: jugadores[2].id, nombre: jugadores[2].nombre, club: jugadores[2].club || '' },
-            jugador2: jugadores[3]
-              ? { id: jugadores[3].id, nombre: jugadores[3].nombre, club: jugadores[3].club || '' }
-              : null,
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: !jugadores[3] ? jugadores[2].id : null,
-            ganadorNombre: !jugadores[3] ? jugadores[2].nombre : null,
-            estado: !jugadores[3] ? 'finalizado' : 'pendiente',
-            siguientePartidoNumero: 3,
-            posicionEnSiguiente: 2,
-            creadoEn: serverTimestamp(),
-          });
-
-          await addDoc(partidosRef, {
-            numeroPartido: 3,
-            ronda: 'Gran Final',
-            jugador1: null,
-            jugador2: !jugadores[3]
-              ? { id: jugadores[2].id, nombre: jugadores[2].nombre, club: jugadores[2].club || '' }
-              : null,
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: null,
-            ganadorNombre: null,
-            estado: 'pendiente',
-            siguientePartidoNumero: null,
-            posicionEnSiguiente: null,
-            creadoEn: serverTimestamp(),
-          });
-        } else {
-          // 5 a 8 jugadores: Cuartos (4 partidos) + Semis (2 partidos) + Final (1 partido) = 7 partidos
-          // Cuartos
-          for (let i = 0; i < 4; i++) {
-            const j1 = jugadores[i * 2] || null;
-            const j2 = jugadores[i * 2 + 1] || null;
-            const semiNum = i < 2 ? 5 : 6;
-            const pos = i % 2 === 0 ? 1 : 2;
-
-            await addDoc(partidosRef, {
-              numeroPartido: i + 1,
-              ronda: 'Cuartos de final',
-              jugador1: j1 ? { id: j1.id, nombre: j1.nombre, club: j1.club || '' } : null,
-              jugador2: j2 ? { id: j2.id, nombre: j2.nombre, club: j2.club || '' } : null,
-              marcador1: 0,
-              marcador2: 0,
-              puntosDetalle: '',
-              ganadorId: j1 && !j2 ? j1.id : null,
-              ganadorNombre: j1 && !j2 ? j1.nombre : null,
-              estado: j1 && !j2 ? 'finalizado' : 'pendiente',
-              siguientePartidoNumero: semiNum,
-              posicionEnSiguiente: pos,
-              creadoEn: serverTimestamp(),
-            });
-          }
-
-          // Semifinales
-          await addDoc(partidosRef, {
-            numeroPartido: 5,
-            ronda: 'Semifinal 1',
-            jugador1: null,
-            jugador2: null,
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: null,
-            ganadorNombre: null,
-            estado: 'pendiente',
-            siguientePartidoNumero: 7,
-            posicionEnSiguiente: 1,
-            creadoEn: serverTimestamp(),
-          });
-
-          await addDoc(partidosRef, {
-            numeroPartido: 6,
-            ronda: 'Semifinal 2',
-            jugador1: null,
-            jugador2: null,
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: null,
-            ganadorNombre: null,
-            estado: 'pendiente',
-            siguientePartidoNumero: 7,
-            posicionEnSiguiente: 2,
-            creadoEn: serverTimestamp(),
-          });
-
-          // Gran Final
-          await addDoc(partidosRef, {
-            numeroPartido: 7,
-            ronda: 'Gran Final',
-            jugador1: null,
-            jugador2: null,
-            marcador1: 0,
-            marcador2: 0,
-            puntosDetalle: '',
-            ganadorId: null,
-            ganadorNombre: null,
-            estado: 'pendiente',
-            siguientePartidoNumero: null,
-            posicionEnSiguiente: null,
-            creadoEn: serverTimestamp(),
-          });
-        }
+        // ── Eliminación Directa — motor dinámico ───────────────
+        const N = jugadores.length;
+        const allowByes = !esPotenciaDe2(N) && (N % 2 === 0 ? false : true);
+        // Para N impar usamos byes; para N par no potencia de 2 usamos todos-juegan (allowByes=false)
+        // (ej. 6 → todos juegan, 5 → 1 bye, 7 → 1 bye, 9 → 7 byes... etc.)
+        const usarByes = !esPotenciaDe2(N) && N % 2 !== 0;
+        await generarFixtureEliminacion(jugadores, usarByes);
       }
 
       const msg = '¡Fixture generado con éxito!';
@@ -415,7 +724,7 @@ export default function DesarrolloTorneoScreen() {
     setModalVisible(true);
   };
 
-  // Guardar resultado de partido
+  // Guardar resultado de partido + avance automático del ganador
   const handleGuardarResultado = async () => {
     if (!partidoActivo) return;
 
@@ -427,6 +736,8 @@ export default function DesarrolloTorneoScreen() {
     }
 
     const ganador = marcador1 > marcador2 ? partidoActivo.jugador1 : partidoActivo.jugador2;
+    const perdedor = marcador1 > marcador2 ? partidoActivo.jugador2 : partidoActivo.jugador1;
+
     if (!ganador) {
       const msg = 'No se ha determinado el jugador ganador.';
       if (Platform.OS === 'web') window.alert(msg);
@@ -436,6 +747,7 @@ export default function DesarrolloTorneoScreen() {
 
     setGuardandoResultado(true);
     try {
+      // 1. Guardar resultado en el partido actual
       const partidoRef = doc(db, 'torneos', torneoId, 'partidos', partidoActivo.id);
       await updateDoc(partidoRef, {
         marcador1,
@@ -446,26 +758,59 @@ export default function DesarrolloTorneoScreen() {
         estado: 'finalizado',
       });
 
-      // Si es eliminación directa y tiene siguiente partido programado, avanzar ganador
-      if (partidoActivo.siguientePartidoNumero) {
+      // 2. Si tiene siguiente partido o destinos → avanzar ganador automáticamente a todos ellos
+      const destinos: SiguienteDestino[] = [];
+      if (partidoActivo.siguientesDestinos && partidoActivo.siguientesDestinos.length > 0) {
+        destinos.push(...partidoActivo.siguientesDestinos);
+      } else if (partidoActivo.siguientePartidoNumero && partidoActivo.posicionEnSiguiente) {
+        destinos.push({
+          numeroPartido: partidoActivo.siguientePartidoNumero,
+          posicionEnSiguiente: partidoActivo.posicionEnSiguiente,
+        });
+      }
+
+      if (destinos.length > 0) {
         const partidosRef = collection(db, 'torneos', torneoId, 'partidos');
         const snap = await getDocs(partidosRef);
-        const sigPartidoDoc = snap.docs.find(
-          (d) => d.data().numeroPartido === partidoActivo.siguientePartidoNumero
-        );
 
-        if (sigPartidoDoc) {
-          const updateField =
-            partidoActivo.posicionEnSiguiente === 1 ? 'jugador1' : 'jugador2';
-          await updateDoc(sigPartidoDoc.ref, {
-            [updateField]: {
-              id: ganador.id,
-              nombre: ganador.nombre,
-              club: ganador.club || '',
-            },
-          });
+        for (const dest of destinos) {
+          const sigPartidoDoc = snap.docs.find(
+            (d) => d.data().numeroPartido === dest.numeroPartido
+          );
+
+          if (sigPartidoDoc) {
+            const updateField =
+              dest.posicionEnSiguiente === 1 ? 'jugador1' : 'jugador2';
+
+            const sigData = sigPartidoDoc.data();
+            const jugadorEnSig: JugadorInfo | null = sigData[updateField] ?? null;
+            const perdedorId = perdedor?.id ?? null;
+
+            // Si se está EDITANDO un resultado previo, limpiar el avance del perdedor anterior
+            if (jugadorEnSig && perdedorId && jugadorEnSig.id === perdedorId) {
+              await updateDoc(sigPartidoDoc.ref, {
+                [updateField]: null,
+                ganadorId: null,
+                ganadorNombre: null,
+                estado: 'pendiente',
+                marcador1: 0,
+                marcador2: 0,
+                puntosDetalle: '',
+              });
+            }
+
+            // Poner al ganador real en el partido siguiente
+            await updateDoc(sigPartidoDoc.ref, {
+              [updateField]: {
+                id: ganador.id,
+                nombre: ganador.nombre,
+                club: ganador.club || '',
+              },
+            });
+          }
         }
       }
+
 
       setModalVisible(false);
     } catch (e: any) {
@@ -476,6 +821,7 @@ export default function DesarrolloTorneoScreen() {
       setGuardandoResultado(false);
     }
   };
+
 
   // Calcular tabla de posiciones para Round Robin
   const calcularPosiciones = (): PosicionJugador[] => {
@@ -535,10 +881,134 @@ export default function DesarrolloTorneoScreen() {
     return lista;
   };
 
-  // Detectar campeón de la final en Eliminación Directa
+  // Flag que indica si el torneo incluye una fase de Triangular Final
+  const tieneTriangular = partidos.some((p) => p.esTriangular || p.ronda === 'Triangular Final');
+
+  // Calcular tabla de posiciones exclusivamente para los finalistas del Triangular Final
+  const calcularPosicionesTriangular = (): PosicionJugador[] => {
+    const partidosTriangular = partidos.filter(
+      (p) => p.esTriangular || p.ronda === 'Triangular Final'
+    );
+    const mapa: { [id: string]: PosicionJugador } = {};
+
+    // Inicializar finalistas presentes en el triangular
+    partidosTriangular.forEach((p) => {
+      if (p.jugador1 && !mapa[p.jugador1.id]) {
+        mapa[p.jugador1.id] = {
+          id: p.jugador1.id,
+          nombre: p.jugador1.nombre,
+          club: p.jugador1.club,
+          pj: 0,
+          pg: 0,
+          pp: 0,
+          sf: 0,
+          sc: 0,
+          puntos: 0,
+        };
+      }
+      if (p.jugador2 && !mapa[p.jugador2.id]) {
+        mapa[p.jugador2.id] = {
+          id: p.jugador2.id,
+          nombre: p.jugador2.nombre,
+          club: p.jugador2.club,
+          pj: 0,
+          pg: 0,
+          pp: 0,
+          sf: 0,
+          sc: 0,
+          puntos: 0,
+        };
+      }
+    });
+
+    // Computar resultados de partidos jugados del triangular
+    partidosTriangular.forEach((p) => {
+      if (p.estado === 'finalizado' && p.jugador1 && p.jugador2) {
+        const j1 = mapa[p.jugador1.id];
+        const j2 = mapa[p.jugador2.id];
+
+        if (j1 && j2) {
+          j1.pj += 1;
+          j2.pj += 1;
+          j1.sf += p.marcador1;
+          j1.sc += p.marcador2;
+          j2.sf += p.marcador2;
+          j2.sc += p.marcador1;
+
+          if (p.marcador1 > p.marcador2) {
+            j1.pg += 1;
+            j1.puntos += 2; // 2 pts por victoria
+            j2.pp += 1;
+            j2.puntos += 1; // 1 pt por partido jugado
+          } else {
+            j2.pg += 1;
+            j2.puntos += 2;
+            j1.pp += 1;
+            j1.puntos += 1;
+          }
+        }
+      }
+    });
+
+    const lista = Object.values(mapa);
+    // Ordenar: 1) Más partidos ganados (PG), 2) Diferencia de Sets, 3) Sets a favor
+    lista.sort((a, b) => {
+      if (b.pg !== a.pg) return b.pg - a.pg;
+      const difA = a.sf - a.sc;
+      const difB = b.sf - b.sc;
+      if (difB !== difA) return difB - difA;
+      return b.sf - a.sf;
+    });
+
+    return lista;
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  DETECCIÓN DE CAMPEÓN DEL TORNEO (Todos los modos)
+  // ─────────────────────────────────────────────────────────────
+  let campeonFinal: string | null = null;
+  let campeonDetalle: string | null = null;
+
+  // 1. Caso Eliminación Directa tradicional (Gran Final)
   const partidoFinal = partidos.find((p) => p.ronda === 'Gran Final');
-  const campeonFinal =
-    partidoFinal && partidoFinal.estado === 'finalizado' ? partidoFinal.ganadorNombre : null;
+  if (partidoFinal && partidoFinal.estado === 'finalizado' && partidoFinal.ganadorNombre) {
+    campeonFinal = partidoFinal.ganadorNombre;
+    campeonDetalle = 'Ganador de la Gran Final';
+  }
+
+  // 2. Caso Triangular Final (3 finalistas)
+  const posTriangular = calcularPosicionesTriangular();
+  const partidosTriangular = partidos.filter((p) => p.esTriangular || p.ronda === 'Triangular Final');
+
+  if (!campeonFinal && tieneTriangular && posTriangular.length > 0) {
+    const lider = posTriangular[0];
+    const totalPartidosTriangular = partidosTriangular.length;
+    const finalizadosTriangular = partidosTriangular.filter((p) => p.estado === 'finalizado').length;
+
+    // Se proclama campeón si ganó 2 partidos o si terminaron los 3 y lidera la tabla
+    if (
+      lider.pg === 2 ||
+      (finalizadosTriangular === totalPartidosTriangular && totalPartidosTriangular > 0 && lider.pj > 0)
+    ) {
+      campeonFinal = lider.nombre;
+      campeonDetalle = `${lider.pg} victorias • 1° Lugar en el Triangular`;
+    }
+  }
+
+  // 3. Caso Modalidad Todos contra todos (Round Robin general)
+  if (!campeonFinal && torneo.modalidad === 'Todos contra todos' && partidos.length > 0) {
+    const totalPartidosRR = partidos.length;
+    const finalizadosRR = partidos.filter((p) => p.estado === 'finalizado').length;
+    const todosFinalizados = finalizadosRR === totalPartidosRR && totalPartidosRR > 0;
+    const tablaRR = calcularPosiciones();
+
+    if (todosFinalizados && tablaRR.length > 0 && tablaRR[0].pj > 0) {
+      const lider = tablaRR[0];
+      campeonFinal = lider.nombre;
+      campeonDetalle = `${lider.puntos} pts • ${lider.pg} victorias de ${lider.pj} partidos jugados`;
+    }
+  }
+
 
   return (
     <ImageBackground
@@ -606,6 +1076,9 @@ export default function DesarrolloTorneoScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.championTitle}>¡CAMPEÓN DEL TORNEO!</Text>
                     <Text style={styles.championName}>{campeonFinal}</Text>
+                    {campeonDetalle ? (
+                      <Text style={styles.championSubtitle}>{campeonDetalle}</Text>
+                    ) : null}
                   </View>
                 </View>
               )}
@@ -642,7 +1115,8 @@ export default function DesarrolloTorneoScreen() {
             ) : (
               <>
                 {/* Switcher para Todos contra todos */}
-                {torneo.modalidad === 'Todos contra todos' && (
+                {/* Switcher para Todos contra todos O cuando hay Triangular Final */}
+                {(torneo.modalidad === 'Todos contra todos' || tieneTriangular) && (
                   <View style={styles.tabsContainer}>
                     <TouchableOpacity
                       style={[styles.tabButton, tabActual === 'partidos' && styles.tabButtonActive]}
@@ -679,15 +1153,29 @@ export default function DesarrolloTorneoScreen() {
                           styles.tabButtonText,
                           tabActual === 'posiciones' && styles.tabButtonTextActive,
                         ]}>
-                        Tabla de Posiciones
+                        {tieneTriangular ? 'Tabla Triangular Final' : 'Tabla de Posiciones'}
                       </Text>
                     </TouchableOpacity>
                   </View>
                 )}
 
-                {/* Vista 1: Tabla de posiciones (solo Round Robin) */}
-                {torneo.modalidad === 'Todos contra todos' && tabActual === 'posiciones' ? (
+                {/* Vista 1: Tabla de posiciones (Round Robin O Triangular Final) */}
+                {((torneo.modalidad === 'Todos contra todos' || tieneTriangular) && tabActual === 'posiciones') ? (
                   <View style={styles.standingsCard}>
+                    {tieneTriangular && (
+                      <View style={styles.standingsBannerTriangular}>
+                        <Ionicons name="trophy" size={20} color="#d97706" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.standingsBannerTriangularTitle}>
+                            Triangular Final — Todos contra todos
+                          </Text>
+                          <Text style={styles.standingsBannerTriangularSub}>
+                            El jugador con más victorias se consagra Campeón del Torneo.
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+
                     <View style={styles.standingsHeaderRow}>
                       <Text style={[styles.standingsCol, { width: 34, textAlign: 'center' }]}>#</Text>
                       <Text style={[styles.standingsCol, { flex: 1 }]}>Jugador</Text>
@@ -700,7 +1188,7 @@ export default function DesarrolloTorneoScreen() {
                       </Text>
                     </View>
 
-                    {calcularPosiciones().map((pos, idx) => {
+                    {(tieneTriangular ? posTriangular : calcularPosiciones()).map((pos, idx) => {
                       const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}°`;
                       return (
                         <View
@@ -743,128 +1231,258 @@ export default function DesarrolloTorneoScreen() {
                     })}
                   </View>
                 ) : (
-                  /* Vista 2: Lista de Partidos / Cruces */
-                  <View style={styles.matchesList}>
-                    {partidos.map((partido) => {
-                      const finalizado = partido.estado === 'finalizado';
-                      const j1Ganador = finalizado && partido.ganadorId === partido.jugador1?.id;
-                      const j2Ganador = finalizado && partido.ganadorId === partido.jugador2?.id;
+                  /* Vista 2: Bracket agrupado por Rondas */
+                  (() => {
+                    // Agrupar partidos por ronda manteniendo el orden original
+                    const rondasOrden: string[] = [];
+                    const rondasMap: Record<string, Partido[]> = {};
+                    partidos.forEach((p) => {
+                      if (!rondasMap[p.ronda]) {
+                        rondasOrden.push(p.ronda);
+                        rondasMap[p.ronda] = [];
+                      }
+                      rondasMap[p.ronda].push(p);
+                    });
 
-                      return (
-                        <View key={partido.id} style={styles.matchCard}>
-                          {/* Cabecera del partido */}
-                          <View style={styles.matchCardHeader}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <View style={styles.matchNumberBadge}>
-                                <Text style={styles.matchNumberText}>#{partido.numeroPartido}</Text>
+                    // Icono y color por nombre de ronda
+                    const rondaMeta: Record<string, { icon: string; color: string; bg: string }> = {
+                      'Octavos de Final':  { icon: 'grid-outline',      color: '#0891b2', bg: '#ecfeff' },
+                      'Cuartos de Final':  { icon: 'apps-outline',      color: '#7c3aed', bg: '#f5f3ff' },
+                      'Semifinal':         { icon: 'git-branch-outline', color: '#d97706', bg: '#fffbeb' },
+                      'Gran Final':        { icon: 'trophy-outline',     color: '#dc2626', bg: '#fff1f2' },
+                      'Triangular Final':  { icon: 'git-compare-outline',color: '#7c3aed', bg: '#f5f3ff' },
+                      'Ronda 1':           { icon: 'layers-outline',     color: '#475569', bg: '#f1f5f9' },
+                      'Todos contra todos':{ icon: 'people-outline',     color: '#2563eb', bg: '#eff6ff' },
+                    };
+                    const metaDefault = { icon: 'tennisball-outline', color: '#475569', bg: '#f1f5f9' };
+
+                    return (
+                      <View style={{ gap: 20 }}>
+                        {rondasOrden.map((rondaNombre) => {
+                          const meta = rondaMeta[rondaNombre] ?? metaDefault;
+                          const partidosRonda = rondasMap[rondaNombre];
+                          const finalizados = partidosRonda.filter((p) => p.estado === 'finalizado').length;
+                          const total = partidosRonda.length;
+
+                          return (
+                            <View key={rondaNombre}>
+                              {/* ── Encabezado de Ronda ── */}
+                              <View style={[styles.roundHeader, { backgroundColor: meta.bg }]}>
+                                <View style={[styles.roundHeaderIcon, { borderColor: meta.color + '40' }]}>
+                                  <Ionicons name={meta.icon as any} size={18} color={meta.color} />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={[styles.roundHeaderTitle, { color: meta.color }]}>
+                                    {rondaNombre}
+                                  </Text>
+                                  <Text style={styles.roundHeaderSub}>
+                                    {finalizados}/{total} partidos completados
+                                  </Text>
+                                </View>
+                                {finalizados === total && total > 0 && (
+                                  <Ionicons name="checkmark-circle" size={20} color="#16a34a" />
+                                )}
                               </View>
-                              <Text style={styles.matchRoundText}>{partido.ronda}</Text>
-                            </View>
 
-                            <View
-                              style={[
-                                styles.statusPill,
-                                finalizado ? styles.statusPillFinished : styles.statusPillPending,
-                              ]}>
-                              <Text
-                                style={[
-                                  styles.statusPillText,
-                                  finalizado
-                                    ? styles.statusPillTextFinished
-                                    : styles.statusPillTextPending,
-                                ]}>
-                                {finalizado ? 'Finalizado' : 'Pendiente'}
-                              </Text>
-                            </View>
-                          </View>
-
-                          {/* Contendientes */}
-                          <View style={styles.matchVersusContainer}>
-                            {/* Jugador 1 */}
-                            <View
-                              style={[
-                                styles.playerSide,
-                                j1Ganador && styles.playerSideWinner,
-                              ]}>
-                              <Text
-                                style={[
-                                  styles.matchPlayerName,
-                                  j1Ganador && styles.matchPlayerNameWinner,
-                                ]}
-                                numberOfLines={1}>
-                                {partido.jugador1 ? partido.jugador1.nombre : 'Por definir'}
-                              </Text>
-                              {j1Ganador && (
-                                <Ionicons name="trophy" size={14} color="#d97706" style={{ marginTop: 2 }} />
+                              {/* ── Si es Triangular Final, mostrar tabla de posiciones en vivo ── */}
+                              {rondaNombre === 'Triangular Final' && posTriangular.length > 0 && (
+                                <View style={styles.inlineStandingsCard}>
+                                  <View style={styles.inlineStandingsHeader}>
+                                    <Ionicons name="podium-outline" size={16} color="#7c3aed" />
+                                    <Text style={styles.inlineStandingsTitle}>
+                                      Tabla en Vivo — Modo Todos contra todos
+                                    </Text>
+                                  </View>
+                                  <View style={styles.standingsHeaderRow}>
+                                    <Text style={[styles.standingsCol, { width: 34, textAlign: 'center' }]}>#</Text>
+                                    <Text style={[styles.standingsCol, { flex: 1 }]}>Jugador</Text>
+                                    <Text style={[styles.standingsCol, { width: 32, textAlign: 'center' }]}>PJ</Text>
+                                    <Text style={[styles.standingsCol, { width: 32, textAlign: 'center' }]}>PG</Text>
+                                    <Text style={[styles.standingsCol, { width: 32, textAlign: 'center' }]}>PP</Text>
+                                    <Text style={[styles.standingsCol, { width: 42, textAlign: 'center' }]}>Sets</Text>
+                                    <Text style={[styles.standingsCol, { width: 36, textAlign: 'center', fontWeight: '800', color: '#7c3aed' }]}>Pts</Text>
+                                  </View>
+                                  {posTriangular.map((pos, idx) => {
+                                    const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}°`;
+                                    return (
+                                      <View
+                                        key={pos.id}
+                                        style={[
+                                          styles.standingsRow,
+                                          idx % 2 === 0 && { backgroundColor: '#f8fafc' },
+                                          idx === 0 && { backgroundColor: '#fef3c7' },
+                                        ]}>
+                                        <Text style={[styles.standingsCell, { width: 34, textAlign: 'center', fontWeight: '700' }]}>{medal}</Text>
+                                        <View style={{ flex: 1, paddingRight: 4 }}>
+                                          <Text style={styles.standingsPlayerName} numberOfLines={1}>{pos.nombre}</Text>
+                                          {pos.club ? (
+                                            <Text style={styles.standingsPlayerClub} numberOfLines={1}>{pos.club}</Text>
+                                          ) : null}
+                                        </View>
+                                        <Text style={[styles.standingsCell, { width: 32, textAlign: 'center' }]}>{pos.pj}</Text>
+                                        <Text style={[styles.standingsCell, { width: 32, textAlign: 'center', color: '#16a34a', fontWeight: '700' }]}>{pos.pg}</Text>
+                                        <Text style={[styles.standingsCell, { width: 32, textAlign: 'center', color: '#dc2626' }]}>{pos.pp}</Text>
+                                        <Text style={[styles.standingsCell, { width: 42, textAlign: 'center', fontSize: 11.5 }]}>{pos.sf}-{pos.sc}</Text>
+                                        <Text style={[styles.standingsCell, { width: 36, textAlign: 'center', fontWeight: '800', color: '#7c3aed' }]}>{pos.puntos}</Text>
+                                      </View>
+                                    );
+                                  })}
+                                </View>
                               )}
+
+                              {/* ── Partidos de esta Ronda ── */}
+                              <View style={{ gap: 10, marginTop: 8 }}>
+                                {partidosRonda.map((partido) => {
+                                  const finalizado = partido.estado === 'finalizado';
+                                  const sinJugadores = !partido.jugador1 || !partido.jugador2;
+                                  const j1Ganador = finalizado && partido.ganadorId === partido.jugador1?.id;
+                                  const j2Ganador = finalizado && partido.ganadorId === partido.jugador2?.id;
+                                  const esTriangular = partido.esTriangular === true;
+
+                                  return (
+                                    <View
+                                      key={partido.id}
+                                      style={[
+                                        styles.matchCard,
+                                        sinJugadores && !finalizado && styles.matchCardLocked,
+                                      ]}>
+
+                                      {/* Cabecera del partido */}
+                                      <View style={styles.matchCardHeader}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                          <View style={[
+                                            styles.matchNumberBadge,
+                                            { backgroundColor: meta.bg, borderWidth: 1, borderColor: meta.color + '30' },
+                                          ]}>
+                                            <Text style={[styles.matchNumberText, { color: meta.color }]}>
+                                              #{partido.numeroPartido}
+                                            </Text>
+                                          </View>
+                                          {sinJugadores && !finalizado && (
+                                            <Ionicons name="lock-closed-outline" size={13} color="#94a3b8" />
+                                          )}
+                                        </View>
+
+                                        <View style={[
+                                          styles.statusPill,
+                                          finalizado
+                                            ? styles.statusPillFinished
+                                            : sinJugadores
+                                              ? styles.statusPillLocked
+                                              : styles.statusPillPending,
+                                        ]}>
+                                          <Text style={[
+                                            styles.statusPillText,
+                                            finalizado
+                                              ? styles.statusPillTextFinished
+                                              : sinJugadores
+                                                ? styles.statusPillTextLocked
+                                                : styles.statusPillTextPending,
+                                          ]}>
+                                            {finalizado ? 'Finalizado' : sinJugadores ? 'Esperando...' : 'Pendiente'}
+                                          </Text>
+                                        </View>
+                                      </View>
+
+                                      {/* Contendientes */}
+                                      <View style={[
+                                        styles.matchVersusContainer,
+                                        sinJugadores && !finalizado && { opacity: 0.5 },
+                                      ]}>
+                                        {/* Jugador 1 */}
+                                        <View style={[styles.playerSide, j1Ganador && styles.playerSideWinner]}>
+                                          <Text
+                                            style={[styles.matchPlayerName, j1Ganador && styles.matchPlayerNameWinner]}
+                                            numberOfLines={1}>
+                                            {partido.jugador1 ? partido.jugador1.nombre : 'Por definir'}
+                                          </Text>
+                                          {partido.jugador1?.club ? (
+                                            <Text style={styles.matchPlayerClub} numberOfLines={1}>
+                                              {partido.jugador1.club}
+                                            </Text>
+                                          ) : null}
+                                          {j1Ganador && (
+                                            <Ionicons name="trophy" size={13} color="#d97706" style={{ marginTop: 2 }} />
+                                          )}
+                                        </View>
+
+                                        {/* Marcador central */}
+                                        <View style={styles.scoreContainer}>
+                                          <Text style={[styles.scoreDigit, finalizado && { color: j1Ganador ? '#16a34a' : '#94a3b8' }]}>
+                                            {partido.marcador1}
+                                          </Text>
+                                          <Text style={styles.scoreSeparator}>-</Text>
+                                          <Text style={[styles.scoreDigit, finalizado && { color: j2Ganador ? '#16a34a' : '#94a3b8' }]}>
+                                            {partido.marcador2}
+                                          </Text>
+                                        </View>
+
+                                        {/* Jugador 2 */}
+                                        <View style={[styles.playerSide, j2Ganador && styles.playerSideWinner]}>
+                                          <Text
+                                            style={[styles.matchPlayerName, j2Ganador && styles.matchPlayerNameWinner]}
+                                            numberOfLines={1}>
+                                            {partido.jugador2 ? partido.jugador2.nombre : 'Por definir'}
+                                          </Text>
+                                          {partido.jugador2?.club ? (
+                                            <Text style={styles.matchPlayerClub} numberOfLines={1}>
+                                              {partido.jugador2.club}
+                                            </Text>
+                                          ) : null}
+                                          {j2Ganador && (
+                                            <Ionicons name="trophy" size={13} color="#d97706" style={{ marginTop: 2 }} />
+                                          )}
+                                        </View>
+                                      </View>
+
+                                      {/* Detalle de sets */}
+                                      {partido.puntosDetalle ? (
+                                        <Text style={styles.pointsDetailText}>
+                                          Sets: {partido.puntosDetalle}
+                                        </Text>
+                                      ) : null}
+
+                                      {/* Flecha de avance al siguiente partido */}
+                                      {finalizado && (partido.siguientePartidoNumero || (partido.siguientesDestinos && partido.siguientesDestinos.length > 0)) && (
+                                        <View style={styles.advanceRow}>
+                                          <Ionicons name="arrow-forward-circle" size={14} color="#16a34a" />
+                                          <Text style={styles.advanceText}>
+                                            {partido.ganadorNombre} avanza → {
+                                              partido.siguientesDestinos && partido.siguientesDestinos.length > 1
+                                                ? `Triangular (Partidos #${partido.siguientesDestinos.map((d) => d.numeroPartido).join(' y #')})`
+                                                : `Partido #${partido.siguientePartidoNumero || partido.siguientesDestinos?.[0]?.numeroPartido}`
+                                            }
+                                          </Text>
+                                        </View>
+                                      )}
+
+                                      {/* Botón registrar (solo propietario, solo si hay 2 jugadores) */}
+                                      {esPropietario && !sinJugadores && (
+                                        <TouchableOpacity
+                                          style={styles.recordScoreButton}
+                                          onPress={() => abrirModalResultado(partido)}
+                                          activeOpacity={0.8}>
+                                          <Ionicons
+                                            name={finalizado ? 'pencil-outline' : 'create-outline'}
+                                            size={15}
+                                            color="#2563eb"
+                                          />
+                                          <Text style={styles.recordScoreButtonText}>
+                                            {finalizado ? 'Editar Resultado' : 'Registrar Marcador'}
+                                          </Text>
+                                        </TouchableOpacity>
+                                      )}
+                                    </View>
+                                  );
+                                })}
+                              </View>
                             </View>
+                          );
+                        })}
+                      </View>
+                    );
+                  })()
 
-                            {/* Marcador central */}
-                            <View style={styles.scoreContainer}>
-                              <Text
-                                style={[
-                                  styles.scoreDigit,
-                                  finalizado && { color: j1Ganador ? '#16a34a' : '#64748b' },
-                                ]}>
-                                {partido.marcador1}
-                              </Text>
-                              <Text style={styles.scoreSeparator}>-</Text>
-                              <Text
-                                style={[
-                                  styles.scoreDigit,
-                                  finalizado && { color: j2Ganador ? '#16a34a' : '#64748b' },
-                                ]}>
-                                {partido.marcador2}
-                              </Text>
-                            </View>
-
-                            {/* Jugador 2 */}
-                            <View
-                              style={[
-                                styles.playerSide,
-                                j2Ganador && styles.playerSideWinner,
-                              ]}>
-                              <Text
-                                style={[
-                                  styles.matchPlayerName,
-                                  j2Ganador && styles.matchPlayerNameWinner,
-                                ]}
-                                numberOfLines={1}>
-                                {partido.jugador2 ? partido.jugador2.nombre : 'Por definir'}
-                              </Text>
-                              {j2Ganador && (
-                                <Ionicons name="trophy" size={14} color="#d97706" style={{ marginTop: 2 }} />
-                              )}
-                            </View>
-                          </View>
-
-                          {/* Detalle de puntos si existe */}
-                          {partido.puntosDetalle ? (
-                            <Text style={styles.pointsDetailText}>
-                              Sets: {partido.puntosDetalle}
-                            </Text>
-                          ) : null}
-
-                          {/* Botón de registrar resultado (Solo propietario) */}
-                          {esPropietario && (
-                            <TouchableOpacity
-                              style={styles.recordScoreButton}
-                              onPress={() => abrirModalResultado(partido)}
-                              activeOpacity={0.8}>
-                              <Ionicons
-                                name={finalizado ? 'pencil-outline' : 'create-outline'}
-                                size={15}
-                                color="#2563eb"
-                              />
-                              <Text style={styles.recordScoreButtonText}>
-                                {finalizado ? 'Editar Resultado' : 'Registrar Marcador'}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
                 )}
 
                 {/* Botón para reiniciar fixture si es propietario */}
@@ -1152,6 +1770,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0f172a',
   },
+  championSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#92400e',
+    marginTop: 2,
+  },
   emptyCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 20,
@@ -1214,6 +1838,55 @@ const styles = StyleSheet.create({
     color: '#2563eb',
     fontWeight: '700',
   },
+  standingsBannerTriangular: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fffbeb',
+    borderBottomWidth: 1,
+    borderBottomColor: '#fef3c7',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  standingsBannerTriangularTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#b45309',
+  },
+  standingsBannerTriangularSub: {
+    fontSize: 11,
+    color: '#92400e',
+    fontWeight: '500',
+  },
+  inlineStandingsCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderRadius: 16,
+    overflow: 'hidden',
+    paddingVertical: 6,
+    borderWidth: 1.5,
+    borderColor: '#e9d5ff',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    marginBottom: 4,
+  },
+  inlineStandingsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#faf5ff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3e8ff',
+  },
+  inlineStandingsTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#7c3aed',
+  },
   standingsCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.97)',
     borderRadius: 18,
@@ -1266,6 +1939,72 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
+  matchCardLocked: {
+    opacity: 0.72,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+  },
+  roundHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  roundHeaderIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  roundHeaderTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  roundHeaderSub: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  matchPlayerClub: {
+    fontSize: 10.5,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginTop: 1,
+  },
+  statusPillLocked: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+  },
+  statusPillTextLocked: {
+    color: '#94a3b8',
+  },
+  advanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 8,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  advanceText: {
+    fontSize: 11.5,
+    color: '#16a34a',
+    fontWeight: '600',
+    flex: 1,
+  },
+
   matchCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1311,6 +2050,21 @@ const styles = StyleSheet.create({
   statusPillTextPending: {
     color: '#64748b',
   },
+  triangularBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f5f3ff',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginBottom: 8,
+  },
+  triangularBannerText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#7c3aed',
+  },
   matchVersusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1319,6 +2073,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 8,
   },
+
   playerSide: {
     flex: 1,
     alignItems: 'center',

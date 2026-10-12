@@ -56,10 +56,18 @@ export default function CrearTorneoScreen() {
 
     try {
       if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('torneos', {
+        // Limpiar el canal anterior si fue registrado con el sonido incorrecto
+        try {
+          await Notifications.deleteNotificationChannelAsync('torneos');
+        } catch (_) {}
+
+        // En Android, omitir la propiedad sound permite que el sistema utilice el sonido nativo
+        // predeterminado sin buscar erróneamente un archivo de audio local llamado "default".
+        await Notifications.setNotificationChannelAsync('torneos_canal', {
           name: 'Notificaciones de torneos',
           importance: Notifications.AndroidImportance.MAX,
-          sound: true,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#2563EB',
         });
       }
 
@@ -88,9 +96,9 @@ export default function CrearTorneoScreen() {
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: 5,
+          seconds: 3,
           ...(Platform.OS === 'android'
-            ? { channelId: 'torneos' }
+            ? { channelId: 'torneos_canal' }
             : {}),
         },
       });
