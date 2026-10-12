@@ -42,6 +42,7 @@ function RootLayoutNav() {
       <Stack.Screen name="crear-torneo" options={{ headerShown: false }} />
       <Stack.Screen name="registrar-jugadores" options={{ headerShown: false }} />
       <Stack.Screen name="ver-torneos" options={{ headerShown: false }} />
+      <Stack.Screen name="desarrollo-torneo" options={{ headerShown: false }} />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );

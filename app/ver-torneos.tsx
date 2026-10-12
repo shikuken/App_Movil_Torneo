@@ -27,6 +27,8 @@ interface Torneo {
   modalidad: string;
   creadoEn?: any;
   usuarioId?: string;
+  fechaTorneo?: string | null;
+  horaTorneo?: string | null;
 }
 
 export default function VerTorneosScreen() {
@@ -57,6 +59,8 @@ export default function VerTorneosScreen() {
             modalidad: data.modalidad || 'Eliminación directa',
             creadoEn: data.creadoEn || null,
             usuarioId: data.usuarioId || '',
+            fechaTorneo: data.fechaTorneo || null,
+            horaTorneo: data.horaTorneo || null,
           });
         });
 
@@ -106,6 +110,8 @@ export default function VerTorneosScreen() {
       torneo.organizador.toLowerCase().includes(queryTexto) ||
       (torneo.lugarSede && torneo.lugarSede.toLowerCase().includes(queryTexto)) ||
       (torneo.categoria && torneo.categoria.toLowerCase().includes(queryTexto)) ||
+      (torneo.fechaTorneo && torneo.fechaTorneo.toLowerCase().includes(queryTexto)) ||
+      (torneo.horaTorneo && torneo.horaTorneo.toLowerCase().includes(queryTexto)) ||
       fechaTexto.includes(queryTexto);
 
     let coincideModalidad: boolean;
@@ -306,6 +312,16 @@ export default function VerTorneosScreen() {
                         </View>
                       ) : null}
 
+                      {torneo.fechaTorneo ? (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="time-outline" size={16} color="#059669" />
+                          <Text style={styles.detailText}>
+                            <Text style={[styles.detailBold, { color: '#059669' }]}>Fecha evento: </Text>
+                            {torneo.fechaTorneo} {torneo.horaTorneo ? `a las ${torneo.horaTorneo}` : ''}
+                          </Text>
+                        </View>
+                      ) : null}
+
                       <View style={styles.detailRow}>
                         <Ionicons name="calendar-outline" size={16} color="#64748b" />
                         <Text style={styles.detailText}>
@@ -314,6 +330,28 @@ export default function VerTorneosScreen() {
                         </Text>
                       </View>
                     </View>
+
+                    {/* Botón para ver desarrollo del torneo (Fixture / Cuadro de partidos) */}
+                    <TouchableOpacity
+                      style={styles.cardBracketButton}
+                      onPress={() => {
+                        const currentUid = auth.currentUser?.uid;
+                        const esPropietario = !!currentUid && currentUid === torneo.usuarioId;
+                        router.push({
+                          pathname: '/desarrollo-torneo' as any,
+                          params: {
+                            torneoId: torneo.id,
+                            nombreTorneo: torneo.nombreTorneo,
+                            modalidad: torneo.modalidad,
+                            esPropietario: esPropietario ? 'true' : 'false',
+                          },
+                        });
+                      }}
+                      activeOpacity={0.85}>
+                      <Ionicons name="trophy" size={16} color="#b45309" />
+                      <Text style={styles.cardBracketButtonText}>Desarrollo / Partidos</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#b45309" />
+                    </TouchableOpacity>
 
                     {/* Botón: Gestionar (solo propietario) o Ver (solo lectura) */}
                     {(() => {
@@ -624,6 +662,24 @@ const styles = StyleSheet.create({
   cardButtonReadOnlyText: {
     color: '#2563eb',
     fontSize: 14.5,
+    fontWeight: '700',
+  },
+  cardBracketButton: {
+    backgroundColor: '#fffbeb',
+    borderWidth: 1.5,
+    borderColor: '#f59e0b',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  cardBracketButtonText: {
+    color: '#b45309',
+    fontSize: 14,
     fontWeight: '700',
   },
 });
