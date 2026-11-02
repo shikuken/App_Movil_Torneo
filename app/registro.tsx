@@ -5,7 +5,6 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  ImageBackground,
   ScrollView,
   StatusBar,
   Alert,
@@ -18,13 +17,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
-import { auth } from '../firebaseConfig';
-import { db } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
+import { SmashTheme } from '../constants/theme';
 
 export default function RegistroScreen() {
   const router = useRouter();
 
-  // Estados exclusivos para los 5 campos solicitados
   const [nombre, setNombre] = useState('');
   const [apellido, setApellido] = useState('');
   const [telefono, setTelefono] = useState('');
@@ -34,7 +32,6 @@ export default function RegistroScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [cargando, setCargando] = useState(false);
 
-  // Sanitizado básico de teléfono (solo números y signo +)
   const handleTelefonoChange = (text: string) => {
     const cleaned = text.replace(/[^0-9+\s-]/g, '');
     setTelefono(cleaned);
@@ -47,7 +44,6 @@ export default function RegistroScreen() {
     const emailTrim = email.trim();
     const passTrim = password.trim();
 
-    // 1. Validar campos obligatorios
     if (!nombreTrim || !apellidoTrim || !telefonoTrim || !emailTrim || !passTrim) {
       Alert.alert(
         'Campos incompletos',
@@ -56,20 +52,17 @@ export default function RegistroScreen() {
       return;
     }
 
-    // 2. Validación de formato de correo
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(emailTrim)) {
       Alert.alert('Correo inválido', 'Por favor ingresa un correo electrónico válido (ej: usuario@ejemplo.com).');
       return;
     }
 
-    // 3. Validación de teléfono mínimo
     if (telefonoTrim.replace(/[^0-9]/g, '').length < 7) {
       Alert.alert('Teléfono inválido', 'Por favor ingresa un número de teléfono válido.');
       return;
     }
 
-    // 4. Validación de longitud de contraseña
     if (passTrim.length < 6) {
       Alert.alert('Contraseña débil', 'La contraseña debe tener al menos 6 caracteres.');
       return;
@@ -82,18 +75,22 @@ export default function RegistroScreen() {
       const userCredential = await createUserWithEmailAndPassword(auth, emailTrim, passTrim);
       const user = userCredential.user;
 
-      // Guardar el perfil completo del usuario en Cloud Firestore
       await setDoc(doc(db, 'usuarios', user.uid), {
         nombre: nombreTrim,
         apellido: apellidoTrim,
         telefono: telefonoTrim,
         email: emailTrim,
+        puntosRanking: 0,
+        torneosJugados: 0,
+        primerosPuestos: 0,
+        segundosPuestos: 0,
+        tercerosPuestos: 0,
         creadoEn: new Date().toISOString(),
       });
 
       Alert.alert(
         '¡Registro Exitoso!',
-        `¡Bienvenido a Smash Match, ${nombreTrim} ${apellidoTrim}! Tu cuenta ha sido creada correctamente en Firebase.`,
+        `¡Bienvenido a Smash Match, ${nombreTrim} ${apellidoTrim}! Tu cuenta ha sido creada correctamente.`,
         [
           {
             text: 'Entrar a la aplicación',
@@ -104,210 +101,229 @@ export default function RegistroScreen() {
         ]
       );
     } catch (err: any) {
-      setError(err.message);
-      Alert.alert('Error al registrarse', err.message || 'No se pudo crear la cuenta.');
+      console.error('Error al registrar usuario:', err);
+      let mensajeError = 'No se pudo completar el registro. Intenta nuevamente.';
+
+      if (err.code === 'auth/email-already-in-use') {
+        mensajeError = 'Este correo electrónico ya se encuentra registrado.';
+      } else if (err.code === 'auth/invalid-email') {
+        mensajeError = 'La dirección de correo electrónico no es válida.';
+      } else if (err.code === 'auth/weak-password') {
+        mensajeError = 'La contraseña debe tener al menos 6 caracteres.';
+      } else if (err.code === 'auth/network-request-failed') {
+        mensajeError = 'Falla de conexión a internet. Verifica tu red.';
+      }
+
+      setError(mensajeError);
+      Alert.alert('Error de registro', mensajeError);
     } finally {
       setCargando(false);
     }
   };
 
   return (
-    <ImageBackground
-      source={{
-        uri: 'https://images.unsplash.com/photo-1534158914592-062992fbe900?auto=format&fit=crop&w=1200&q=80',
-      }}
-      style={styles.backgroundImage}
-      resizeMode="cover">
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar barStyle="light-content" />
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.keyboardView}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
-            <ScrollView
-              contentContainerStyle={styles.scrollContainer}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              bounces={false}>
-              
-              {/* Botón Volver a Login */}
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => router.push('/login')}
-                activeOpacity={0.8}>
-                <Ionicons name="arrow-back-circle-outline" size={24} color="#ffffff" />
-                <Text style={styles.backButtonText}>Volver al inicio de sesión</Text>
-              </TouchableOpacity>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Luces de fondo (Aura deportiva) */}
+      <View style={styles.glowTop} pointerEvents="none" />
+      <View style={styles.glowBottom} pointerEvents="none" />
 
-              {/* Tarjeta de Formulario */}
-              <View style={styles.cardContainer}>
-                <View style={styles.headerTitleContainer}>
-                  <Text style={styles.formTitle}>Crear Cuenta</Text>
-                  <Text style={styles.formSubtitle}>
-                    Regístrate para competir y gestionar torneos
-                  </Text>
-                </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          
+          {/* Barra superior con volver */}
+          <View style={styles.topHeader}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.replace('/login')}
+              activeOpacity={0.7}>
+              <Ionicons name="arrow-back" size={20} color={SmashTheme.colors.onSurface} />
+            </TouchableOpacity>
+            <View style={styles.headerTitleContainer}>
+              <Text style={styles.headerTitle}>Crear Cuenta</Text>
+              <Text style={styles.headerSubtitle}>Únete a la liga Smash Match</Text>
+            </View>
+          </View>
 
-                {/* Banner de error visible si ocurre una falla */}
-                {error ? (
-                  <View style={styles.errorBanner}>
-                    <Ionicons name="alert-circle" size={18} color="#ef4444" />
-                    <Text style={styles.errorBannerText}>{error}</Text>
-                  </View>
-                ) : null}
+          {/* Tarjeta del Formulario */}
+          <View style={styles.cardContainer}>
+            {error ? (
+              <View style={styles.errorBanner}>
+                <Ionicons name="alert-circle" size={18} color={SmashTheme.colors.liveRed} />
+                <Text style={styles.errorBannerText}>{error}</Text>
+              </View>
+            ) : null}
 
-                {/* Campo 1: Nombre */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Nombre</Text>
-                  <View style={styles.inputWrapper}>
-                    <Ionicons name="person-outline" size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Ej: Carlos"
-                      placeholderTextColor="#94a3b8"
-                      autoCapitalize="words"
-                      value={nombre}
-                      onChangeText={setNombre}
-                    />
-                  </View>
-                </View>
-
-                {/* Campo 2: Apellido */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Apellido</Text>
-                  <View style={styles.inputWrapper}>
-                    <Ionicons name="person-outline" size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Ej: Gómez"
-                      placeholderTextColor="#94a3b8"
-                      autoCapitalize="words"
-                      value={apellido}
-                      onChangeText={setApellido}
-                    />
-                  </View>
-                </View>
-
-                {/* Campo 3: Teléfono */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Teléfono</Text>
-                  <View style={styles.inputWrapper}>
-                    <Ionicons name="call-outline" size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Ej: +57 312 345 6789"
-                      placeholderTextColor="#94a3b8"
-                      keyboardType="phone-pad"
-                      value={telefono}
-                      onChangeText={handleTelefonoChange}
-                    />
-                  </View>
-                </View>
-
-                {/* Campo 4: Correo electrónico */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Correo electrónico</Text>
-                  <View style={styles.inputWrapper}>
-                    <Ionicons name="mail-outline" size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Ej: carlos@correo.com"
-                      placeholderTextColor="#94a3b8"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      value={email}
-                      onChangeText={(val) => {
-                        setEmail(val);
-                        if (error) setError('');
-                      }}
-                    />
-                  </View>
-                </View>
-
-                {/* Campo 5: Contraseña */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Contraseña</Text>
-                  <View style={styles.inputWrapper}>
-                    <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Mínimo 6 caracteres"
-                      placeholderTextColor="#94a3b8"
-                      secureTextEntry={!showPassword}
-                      value={password}
-                      onChangeText={(val) => {
-                        setPassword(val);
-                        if (error) setError('');
-                      }}
-                    />
-                    <TouchableOpacity
-                      onPress={() => setShowPassword(!showPassword)}
-                      style={styles.eyeButton}
-                      activeOpacity={0.7}>
-                      <Ionicons
-                        name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                        size={20}
-                        color="#64748b"
-                      />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Botón Principal: Registrarse */}
-                <TouchableOpacity
-                  style={[styles.registerButton, cargando && { opacity: 0.75 }]}
-                  onPress={handleRegistro}
-                  activeOpacity={0.85}
-                  disabled={cargando}>
-                  {cargando ? (
-                    <ActivityIndicator color="#ffffff" size="small" />
-                  ) : (
-                    <>
-                      <Text style={styles.registerButtonText}>Registrarse</Text>
-                      <Ionicons name="checkmark-circle" size={22} color="#ffffff" />
-                    </>
-                  )}
-                </TouchableOpacity>
-
-                {/* Divisor */}
-                <View style={styles.dividerContainer}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>o</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                {/* Enlace para volver a Iniciar Sesión */}
-                <View style={styles.loginPrompt}>
-                  <Text style={styles.promptText}>¿Ya tienes una cuenta? </Text>
-                  <TouchableOpacity
-                    onPress={() => router.push('/login')}
-                    activeOpacity={0.7}>
-                    <Text style={styles.loginLink}>Inicia sesión</Text>
-                  </TouchableOpacity>
+            {/* Fila Nombre y Apellido */}
+            <View style={styles.row}>
+              <View style={[styles.formGroup, styles.halfCol]}>
+                <Text style={styles.label}>Nombre *</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="person-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Carlos"
+                    placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                    autoCapitalize="words"
+                    value={nombre}
+                    onChangeText={(val) => {
+                      setNombre(val);
+                      if (error) setError('');
+                    }}
+                  />
                 </View>
               </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </View>
-    </ImageBackground>
+
+              <View style={[styles.formGroup, styles.halfCol]}>
+                <Text style={styles.label}>Apellido *</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="person-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Rodríguez"
+                    placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                    autoCapitalize="words"
+                    value={apellido}
+                    onChangeText={(val) => {
+                      setApellido(val);
+                      if (error) setError('');
+                    }}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Teléfono */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Teléfono móvil *</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="call-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="+57 300 123 4567"
+                  placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                  keyboardType="phone-pad"
+                  value={telefono}
+                  onChangeText={(val) => {
+                    handleTelefonoChange(val);
+                    if (error) setError('');
+                  }}
+                />
+              </View>
+            </View>
+
+            {/* Correo electrónico */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Correo Electrónico *</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="mail-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="tu.correo@ejemplo.com"
+                  placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={email}
+                  onChangeText={(val) => {
+                    setEmail(val);
+                    if (error) setError('');
+                  }}
+                />
+              </View>
+            </View>
+
+            {/* Contraseña */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Contraseña *</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="lock-closed-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Mínimo 6 caracteres"
+                  placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={(val) => {
+                    setPassword(val);
+                    if (error) setError('');
+                  }}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.eyeButton}
+                  activeOpacity={0.7}>
+                  <Ionicons
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={18}
+                    color={SmashTheme.colors.onSurfaceVariant}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Botón de Registro Volt */}
+            <TouchableOpacity
+              style={[styles.submitButton, cargando && { opacity: 0.75 }]}
+              onPress={handleRegistro}
+              activeOpacity={0.85}
+              disabled={cargando}>
+              {cargando ? (
+                <ActivityIndicator color={SmashTheme.colors.onPrimary} size="small" />
+              ) : (
+                <>
+                  <Text style={styles.submitButtonText}>Registrar mi cuenta</Text>
+                  <Ionicons name="checkmark-circle" size={18} color={SmashTheme.colors.onPrimary} />
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* Enlace para volver al login */}
+            <View style={styles.loginPrompt}>
+              <Text style={styles.promptText}>¿Ya tienes una cuenta activa? </Text>
+              <TouchableOpacity
+                onPress={() => router.replace('/login')}
+                activeOpacity={0.7}>
+                <Text style={styles.loginLink}>Inicia sesión</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.78)',
-  },
   safeArea: {
     flex: 1,
+    backgroundColor: SmashTheme.colors.surface,
+  },
+  glowTop: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: SmashTheme.colors.primary,
+    opacity: 0.08,
+  },
+  glowBottom: {
+    position: 'absolute',
+    bottom: -60,
+    left: -60,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: SmashTheme.colors.secondary,
+    opacity: 0.08,
   },
   keyboardView: {
     flex: 1,
@@ -316,138 +332,126 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 120,
-    alignItems: 'stretch',
+    paddingBottom: 40,
   },
-  backButton: {
+  topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: 20,
-    alignSelf: 'flex-start',
+    marginBottom: 20,
+    marginTop: 8,
+    gap: 12,
   },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  cardContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-    borderRadius: 24,
-    padding: 24,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 8,
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitleContainer: {
-    marginBottom: 16,
-    alignItems: 'center',
+    flex: 1,
   },
-  formTitle: {
-    fontSize: 26,
+  headerTitle: {
+    fontSize: 22,
     fontWeight: '800',
-    color: '#0f172a',
-    textAlign: 'center',
-    letterSpacing: -0.5,
+    color: SmashTheme.colors.onSurface,
   },
-  formSubtitle: {
-    fontSize: 13,
-    color: '#64748b',
-    textAlign: 'center',
-    marginTop: 4,
+  headerSubtitle: {
+    fontSize: 12,
+    color: SmashTheme.colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  cardContainer: {
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 6,
   },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fef2f2',
-    borderColor: '#fca5a5',
+    backgroundColor: 'rgba(255, 59, 48, 0.12)',
     borderWidth: 1,
-    borderRadius: 10,
+    borderColor: 'rgba(255, 59, 48, 0.35)',
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom: 14,
+    marginBottom: 16,
     gap: 8,
   },
   errorBannerText: {
-    color: '#b91c1c',
+    color: SmashTheme.colors.liveRed,
     fontSize: 13,
     fontWeight: '600',
     flex: 1,
   },
+  row: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  halfCol: {
+    flex: 1,
+  },
   formGroup: {
-    marginBottom: 14,
+    marginBottom: 15,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#334155',
+    fontSize: 12,
+    fontWeight: '600',
+    color: SmashTheme.colors.onSurface,
     marginBottom: 6,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderWidth: 1.5,
-    borderColor: '#cbd5e1',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderRadius: 14,
-    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    paddingHorizontal: 12,
+    height: 48,
   },
   inputIcon: {
-    marginRight: 10,
+    marginRight: 8,
   },
   textInput: {
     flex: 1,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#0f172a',
+    color: SmashTheme.colors.onSurface,
+    fontSize: 13,
+    height: '100%',
   },
   eyeButton: {
     padding: 6,
   },
-  registerButton: {
-    backgroundColor: '#16a34a',
+  submitButton: {
+    backgroundColor: SmashTheme.colors.primary,
     borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
+    height: 50,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
     gap: 8,
-    marginTop: 10,
-    elevation: 4,
-    shadowColor: '#16a34a',
+    marginTop: 8,
+    marginBottom: 18,
+    shadowColor: SmashTheme.colors.primary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  registerButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
+  submitButtonText: {
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 15,
     fontWeight: '800',
-    textAlign: 'center',
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e2e8f0',
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '600',
   },
   loginPrompt: {
     flexDirection: 'row',
@@ -455,12 +459,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   promptText: {
-    fontSize: 14,
-    color: '#64748b',
+    fontSize: 12,
+    color: SmashTheme.colors.onSurfaceVariant,
   },
   loginLink: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '700',
+    color: SmashTheme.colors.primary,
   },
 });

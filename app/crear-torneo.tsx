@@ -5,7 +5,6 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  ImageBackground,
   ScrollView,
   StatusBar,
   Alert,
@@ -17,9 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { auth } from '../firebaseConfig';
-import { db } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
 import * as Notifications from 'expo-notifications';
+import { SmashTheme } from '../constants/theme';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -32,14 +31,19 @@ Notifications.setNotificationHandler({
 
 export default function CrearTorneoScreen() {
   const router = useRouter();
+  const currentUser = auth.currentUser;
 
-  // Estados para los campos de entrada de texto
+  // Estados para los campos de entrada
   const [nombreTorneo, setNombreTorneo] = useState('');
-  const [organizador, setOrganizador] = useState('');
+  const [organizador, setOrganizador] = useState(
+    currentUser?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : '')
+  );
   const [lugarSede, setLugarSede] = useState('');
-  const [categoria, setCategoria] = useState('');
+  const [categoria, setCategoria] = useState('Intermedia');
   const [fechaTorneo, setFechaTorneo] = useState('');
-  const [horaTorneo, setHoraTorneo] = useState('');
+  const [horaTorneo, setHoraTorneo] = useState('16:00');
+  const [tipoTorneo, setTipoTorneo] = useState<'amistoso' | 'clasificatorio'>('amistoso');
+  const [modalidad, setModalidad] = useState<'Eliminación directa' | 'Todos contra todos'>('Eliminación directa');
   const [cargando, setCargando] = useState(false);
 
   const mostrarMensaje = (titulo: string, mensaje: string) => {
@@ -50,105 +54,58 @@ export default function CrearTorneoScreen() {
     }
   };
 
-  // Notificación local automática
-  const notificarTorneoCreado = async (nombreTorneo: string) => {
+  const notificarTorneoCreado = async (nombre: string) => {
     if (Platform.OS === 'web') return;
 
     try {
       if (Platform.OS === 'android') {
-        // Limpiar el canal anterior si fue registrado con el sonido incorrecto
         try {
           await Notifications.deleteNotificationChannelAsync('torneos');
         } catch (_) {}
 
-        // En Android, omitir la propiedad sound permite que el sistema utilice el sonido nativo
-        // predeterminado sin buscar erróneamente un archivo de audio local llamado "default".
         await Notifications.setNotificationChannelAsync('torneos_canal', {
           name: 'Notificaciones de torneos',
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#2563EB',
+          lightColor: SmashTheme.colors.primary,
         });
       }
 
-      let { status, canAskAgain } =
-        await Notifications.getPermissionsAsync();
+      let { status, canAskAgain } = await Notifications.getPermissionsAsync();
 
       if (status !== 'granted' && canAskAgain) {
-        const respuesta =
-          await Notifications.requestPermissionsAsync();
+        const respuesta = await Notifications.requestPermissionsAsync();
         status = respuesta.status;
       }
 
-      if (status !== 'granted') {
-        console.log('Permiso de notificaciones denegado');
-        return;
-      }
+      if (status !== 'granted') return;
 
       await Notifications.scheduleNotificationAsync({
         content: {
           title: '🏆 Torneo creado exitosamente',
-          body: `El torneo "${nombreTorneo}" fue creado correctamente en Smash Match.`,
+          body: `El torneo "${nombre}" fue creado correctamente en Smash Match.`,
           sound: true,
-          data: {
-            url: '/ver-torneos',
-          },
+          data: { url: '/ver-torneos' },
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: 3,
-          ...(Platform.OS === 'android'
-            ? { channelId: 'torneos_canal' }
-            : {}),
+          seconds: 2,
+          ...(Platform.OS === 'android' ? { channelId: 'torneos_canal' } : {}),
         },
       });
-
-      console.log('Notificación programada');
     } catch (error) {
       console.error('Error de notificación:', error);
     }
   };
-  // Estado para la opción de modalidad seleccionada
-  const [modalidad, setModalidad] = useState<'Eliminación directa' | 'Todos contra todos'>(
-    'Eliminación directa'
-  );
 
-  // Sanitizado para permitir únicamente caracteres alfanuméricos y espacios
-  const handleAlphanumericChange = (text: string, setter: (val: string) => void) => {
-    const sanitizedText = text.replace(/[^a-zA-Z0-9\s]/g, '');
-    setter(sanitizedText);
-  };
-
-  // Helper para asignar fecha de hoy o mañana
-  const handleSetQuickDate = (diasAdicionales: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + diasAdicionales);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    setFechaTorneo(`${yyyy}-${mm}-${dd}`);
-  };
-
-  // Manejo del botón de acción "Registrar jugadores"
   const handleRegistrarJugadores = async () => {
     if (!nombreTorneo.trim() || !organizador.trim()) {
-      const msg = 'Por favor completa la información del torneo (Nombre y Organizador) para continuar.';
-      if (Platform.OS === 'web') {
-        window.alert(msg);
-      } else {
-        Alert.alert('Campos incompletos', msg);
-      }
+      mostrarMensaje('Campos incompletos', 'Por favor ingresa el nombre del torneo y el organizador.');
       return;
     }
 
-    const currentUser = auth.currentUser;
     if (!currentUser) {
-      const msg = 'Por favor inicia sesión para crear un torneo.';
-      if (Platform.OS === 'web') {
-        window.alert(msg);
-      } else {
-        Alert.alert('Sesión requerida', msg);
-      }
+      mostrarMensaje('Sesión requerida', 'Por favor inicia sesión para crear un torneo.');
       router.replace('/login');
       return;
     }
@@ -161,446 +118,567 @@ export default function CrearTorneoScreen() {
         nombreTorneo: nombreTorneo.trim(),
         organizador: organizador.trim(),
         lugarSede: lugarSede.trim() || null,
-        categoria: categoria.trim() || null,
+        categoria: categoria.trim() || 'Intermedia',
         modalidad,
+        tipoTorneo,
+        puntosAsignados: false,
         fechaTorneo: fechaTorneo.trim() || null,
         horaTorneo: horaTorneo.trim() || null,
         creadoEn: serverTimestamp(),
+        estado: 'creado',
       });
 
-      // Enviar notificación local después de guardar el torneo
       await notificarTorneoCreado(nombreTorneo.trim());
 
-      // Navegar inmediatamente a la vista para registrar jugadores del torneo creado
       router.push({
-        pathname: '/registrar-jugadores' as any,
+        pathname: '/registrar-jugadores',
         params: {
           torneoId: docRef.id,
           nombreTorneo: nombreTorneo.trim(),
-          modalidad,
+          modalidad: modalidad,
+          tipoTorneo: tipoTorneo,
           esPropietario: 'true',
         },
       });
     } catch (error: any) {
-      const errMsg = error.message || 'Ocurrió un error al guardar en la nube.';
-      if (Platform.OS === 'web') {
-        window.alert(`Error al crear torneo: ${errMsg}`);
-      } else {
-        Alert.alert('Error al crear torneo', errMsg);
-      }
+      console.error('Error al crear el torneo:', error);
+      mostrarMensaje('Error al guardar', 'No se pudo registrar el torneo. Verifica tu conexión a internet.');
     } finally {
       setCargando(false);
     }
   };
 
-  // Manejo del botón "Regresar a la página principal"
-  const handleRegresar = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.push('/');
-    }
-  };
-
-
   return (
-    <ImageBackground
-      source={{
-        uri: 'https://images.unsplash.com/photo-1611251126786-291730073574?auto=format&fit=crop&w=1000&q=80',
-      }}
-      style={styles.backgroundImage}
-      resizeMode="cover">
-      {/* Capa oscura superpuesta para legibilidad */}
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar barStyle="light-content" />
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.keyboardView}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
-            <ScrollView
-              contentContainerStyle={styles.scrollContainer}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              bounces={false}>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Luces de ambiente neón */}
+      <View style={styles.glowTop} pointerEvents="none" />
 
-              {/* Botón para regresar a la página principal */}
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={handleRegresar}
-                activeOpacity={0.8}
-                accessibilityLabel="Regresar a la página principal">
-                <Ionicons name="arrow-back-circle-outline" size={26} color="#ffffff" />
-                <Text style={styles.backButtonText}>Regresar a la página principal</Text>
-              </TouchableOpacity>
+      {/* Header fijo estilo Stitch */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.replace('/(tabs)')}
+          activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={20} color={SmashTheme.colors.onSurface} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>Crear Nuevo Torneo</Text>
+          <Text style={styles.headerSubtitle}>Paso 1: Parámetros del evento</Text>
+        </View>
+      </View>
 
-              {/* Tarjeta contenedora con fondo semi-transparente */}
-              <View style={styles.cardContainer}>
-                {/* Título de la pantalla */}
-                <Text style={styles.mainTitle}>Crea tu torneo</Text>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
 
-                {/* Formulario: Campo 1 - Nombre del torneo */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Nombre del torneo</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="Ej: Torneo Smash 2026"
-                    placeholderTextColor="#94a3b8"
-                    value={nombreTorneo}
-                    onChangeText={(text) => handleAlphanumericChange(text, setNombreTorneo)}
-                    autoCapitalize="words"
-                  />
+          <View style={styles.formCard}>
+            {/* 1. Nombre del Torneo */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Nombre del Torneo *</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="trophy-outline" size={18} color={SmashTheme.colors.primary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Ej: Torneo Clausura Smash 2026"
+                  placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                  value={nombreTorneo}
+                  onChangeText={setNombreTorneo}
+                />
+              </View>
+            </View>
+
+            {/* 2. Organizador */}
+            <View style={styles.formGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Organizador / Club *</Text>
+                <View style={styles.badgeOfficial}>
+                  <Ionicons name="checkmark-circle" size={12} color={SmashTheme.colors.secondary} />
+                  <Text style={styles.badgeOfficialText}>OFICIAL</Text>
                 </View>
+              </View>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="person-circle-outline" size={18} color={SmashTheme.colors.secondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nombre de la academia o director"
+                  placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                  value={organizador}
+                  onChangeText={setOrganizador}
+                />
+              </View>
+            </View>
 
-                {/* Formulario: Campo 2 - Organizador */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Organizador</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="Ej: Club Tenis de Mesa Cali"
-                    placeholderTextColor="#94a3b8"
-                    value={organizador}
-                    onChangeText={(text) => handleAlphanumericChange(text, setOrganizador)}
-                    autoCapitalize="words"
-                  />
-                </View>
-
-                {/* Formulario: Campo 3 - Lugar o Sede */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Lugar / Sede</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="Ej: Coliseo Central Mza 4"
-                    placeholderTextColor="#94a3b8"
-                    value={lugarSede}
-                    onChangeText={(text) => handleAlphanumericChange(text, setLugarSede)}
-                    autoCapitalize="words"
-                  />
-                </View>
-
-                {/* Formulario: Campo 4 - Categoría */}
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Categoría o Nivel</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="Ej: Categoria Avanzada 2026"
-                    placeholderTextColor="#94a3b8"
-                    value={categoria}
-                    onChangeText={(text) => handleAlphanumericChange(text, setCategoria)}
-                    autoCapitalize="sentences"
-                  />
-                </View>
-
-                {/* Formulario: Campo 5 - Fecha y Hora del Torneo */}
-                <View style={styles.formRow}>
-                  <View style={[styles.formGroup, { flex: 1, marginRight: 6 }]}>
-                    <View style={styles.labelWithIcon}>
-                      <Ionicons name="calendar-outline" size={15} color="#2563eb" />
-                      <Text style={styles.label}>Fecha torneo</Text>
-                    </View>
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="#94a3b8"
-                      value={fechaTorneo}
-                      onChangeText={setFechaTorneo}
-                    />
-                    <View style={styles.quickButtonsRow}>
-                      <TouchableOpacity
-                        style={styles.quickDateButton}
-                        onPress={() => handleSetQuickDate(0)}
-                        activeOpacity={0.7}>
-                        <Text style={styles.quickDateText}>Hoy</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.quickDateButton}
-                        onPress={() => handleSetQuickDate(1)}
-                        activeOpacity={0.7}>
-                        <Text style={styles.quickDateText}>Mañana</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  <View style={[styles.formGroup, { flex: 1, marginLeft: 6 }]}>
-                    <View style={styles.labelWithIcon}>
-                      <Ionicons name="time-outline" size={15} color="#2563eb" />
-                      <Text style={styles.label}>Hora inicio</Text>
-                    </View>
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Ej: 09:00 AM"
-                      placeholderTextColor="#94a3b8"
-                      value={horaTorneo}
-                      onChangeText={setHoraTorneo}
-                    />
-                    <View style={styles.quickButtonsRow}>
-                      {['09:00 AM', '02:00 PM', '06:00 PM'].map((h) => (
-                        <TouchableOpacity
-                          key={h}
-                          style={[styles.quickDateButton, horaTorneo === h && styles.quickDateButtonActive]}
-                          onPress={() => setHoraTorneo(h)}
-                          activeOpacity={0.7}>
-                          <Text style={[styles.quickDateText, horaTorneo === h && styles.quickDateTextActive]}>
-                            {h.split(' ')[0]}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                </View>
-
-                {/* Sección Modalidad */}
-                <View style={styles.modalitySection}>
-                  <Text style={styles.modalityTitle}>Modalidad</Text>
-                  <View style={styles.modalityButtonsContainer}>
-                    {/* Opción 1: Eliminación directa */}
+            {/* 3. Selector de Categoría / Nivel (Segmented Control Stitch) */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Categoría / Nivel de Juego</Text>
+              <View style={styles.segmentedContainer}>
+                {['Aficionados', 'Intermedia', 'Avanzado/Pro'].map((cat) => {
+                  const isActive = categoria === cat;
+                  return (
                     <TouchableOpacity
-                      style={[
-                        styles.modalityButton,
-                        modalidad === 'Eliminación directa' && styles.modalityButtonSelected,
-                      ]}
-                      onPress={() => setModalidad('Eliminación directa')}
+                      key={cat}
+                      style={[styles.segmentBtn, isActive && styles.segmentBtnActive]}
+                      onPress={() => setCategoria(cat)}
                       activeOpacity={0.8}>
-                      <Ionicons
-                        name="git-commit-outline"
-                        size={20}
-                        color={modalidad === 'Eliminación directa' ? '#ffffff' : '#2563eb'}
-                        style={styles.modalityIcon}
-                      />
-                      <Text
-                        style={[
-                          styles.modalityButtonText,
-                          modalidad === 'Eliminación directa' && styles.modalityButtonTextSelected,
-                        ]}>
-                        Eliminación directa
+                      {isActive && <View style={styles.segmentActiveDot} />}
+                      <Text style={[styles.segmentBtnText, isActive && styles.segmentBtnTextActive]}>
+                        {cat}
                       </Text>
                     </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
 
-                    {/* Opción 2: Todos contra todos */}
-                    <TouchableOpacity
-                      style={[
-                        styles.modalityButton,
-                        modalidad === 'Todos contra todos' && styles.modalityButtonSelected,
-                      ]}
-                      onPress={() => setModalidad('Todos contra todos')}
-                      activeOpacity={0.8}>
-                      <Ionicons
-                        name="grid-outline"
-                        size={20}
-                        color={modalidad === 'Todos contra todos' ? '#ffffff' : '#2563eb'}
-                        style={styles.modalityIcon}
-                      />
-                      <Text
-                        style={[
-                          styles.modalityButtonText,
-                          modalidad === 'Todos contra todos' && styles.modalityButtonTextSelected,
-                        ]}>
-                        Todos contra todos
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+            {/* 4. Sede o Ubicación */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Sede o Ubicación</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="location-outline" size={18} color={SmashTheme.colors.secondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Ej: Club Raqueta Norte, Pistas 1 y 2"
+                  placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                  value={lugarSede}
+                  onChangeText={setLugarSede}
+                />
+              </View>
+            </View>
+
+            {/* 5. Fecha y Hora */}
+            <View style={styles.row}>
+              <View style={[styles.formGroup, styles.halfCol]}>
+                <Text style={styles.label}>Fecha</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="calendar-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                    value={fechaTorneo}
+                    onChangeText={setFechaTorneo}
+                  />
                 </View>
+              </View>
 
-                {/* Botón principal: Registrar jugadores */}
+              <View style={[styles.formGroup, styles.halfCol]}>
+                <Text style={styles.label}>Hora Prevista</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="time-outline" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="16:00"
+                    placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+                    value={horaTorneo}
+                    onChangeText={setHoraTorneo}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* 6. Tipo de Torneo (Amistoso vs Clasificatorio) */}
+            <View style={styles.formGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Tipo de Torneo *</Text>
+                {tipoTorneo === 'clasificatorio' && (
+                  <View style={styles.badgeRankOfficial}>
+                    <Ionicons name="ribbon" size={12} color={SmashTheme.colors.primary} />
+                    <Text style={styles.badgeRankOfficialText}>SUMA RANKING (3, 2, 1 PTS)</Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.modalidadCardsRow}>
+                {/* Opción 1: Amistoso */}
                 <TouchableOpacity
-                  style={[styles.submitButton, cargando && { opacity: 0.75 }]}
-                  onPress={handleRegistrarJugadores}
-                  activeOpacity={0.85}
-                  disabled={cargando}>
-                  {cargando ? (
-                    <ActivityIndicator color="#ffffff" size="small" />
-                  ) : (
-                    <>
-                      <Text style={styles.submitButtonText}>Registrar jugadores</Text>
-                      <Ionicons name="arrow-forward" size={22} color="#ffffff" />
-                    </>
-                  )}
+                  style={[
+                    styles.modalidadCard,
+                    tipoTorneo === 'amistoso' && styles.modalidadCardActive,
+                  ]}
+                  onPress={() => setTipoTorneo('amistoso')}
+                  activeOpacity={0.8}>
+                  <View style={styles.modalidadCardTop}>
+                    <Ionicons
+                      name="tennisball-outline"
+                      size={20}
+                      color={tipoTorneo === 'amistoso' ? SmashTheme.colors.primary : SmashTheme.colors.onSurfaceVariant}
+                    />
+                    {tipoTorneo === 'amistoso' ? (
+                      <Ionicons name="checkmark-circle" size={18} color={SmashTheme.colors.primary} />
+                    ) : (
+                      <View style={styles.uncheckDot} />
+                    )}
+                  </View>
+                  <Text style={[styles.modalidadTitle, tipoTorneo === 'amistoso' && styles.modalidadTitleActive]}>
+                    Amistoso
+                  </Text>
+                  <Text style={styles.modalidadDesc}>
+                    Recreativo. Registro libre de jugadores sin impacto en el ranking.
+                  </Text>
                 </TouchableOpacity>
 
+                {/* Opción 2: Clasificatorio */}
+                <TouchableOpacity
+                  style={[
+                    styles.modalidadCard,
+                    tipoTorneo === 'clasificatorio' && styles.modalidadCardActiveCyan,
+                  ]}
+                  onPress={() => setTipoTorneo('clasificatorio')}
+                  activeOpacity={0.8}>
+                  <View style={styles.modalidadCardTop}>
+                    <Ionicons
+                      name="trophy"
+                      size={20}
+                      color={tipoTorneo === 'clasificatorio' ? SmashTheme.colors.secondary : SmashTheme.colors.onSurfaceVariant}
+                    />
+                    {tipoTorneo === 'clasificatorio' ? (
+                      <Ionicons name="checkmark-circle" size={18} color={SmashTheme.colors.secondary} />
+                    ) : (
+                      <View style={styles.uncheckDot} />
+                    )}
+                  </View>
+                  <Text style={[styles.modalidadTitle, tipoTorneo === 'clasificatorio' && styles.modalidadTitleActiveCyan]}>
+                    Clasificatorio
+                  </Text>
+                  <Text style={styles.modalidadDesc}>
+                    Oficial. Inscribe usuarios de la app y otorga puntos: 1° (3pts), 2° (2pts), 3° (1pt).
+                  </Text>
+                </TouchableOpacity>
               </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </View>
-    </ImageBackground>
+            </View>
+
+            {/* 7. Modalidad de Competición (Cards estilo Stitch) */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Modalidad de Competencia</Text>
+              <View style={styles.modalidadCardsRow}>
+                {/* Opción 1: Eliminación Directa */}
+                <TouchableOpacity
+                  style={[
+                    styles.modalidadCard,
+                    modalidad === 'Eliminación directa' && styles.modalidadCardActive,
+                  ]}
+                  onPress={() => setModalidad('Eliminación directa')}
+                  activeOpacity={0.8}>
+                  <View style={styles.modalidadCardTop}>
+                    <Ionicons
+                      name="git-network-outline"
+                      size={20}
+                      color={modalidad === 'Eliminación directa' ? SmashTheme.colors.primary : SmashTheme.colors.onSurfaceVariant}
+                    />
+                    {modalidad === 'Eliminación directa' ? (
+                      <Ionicons name="checkmark-circle" size={18} color={SmashTheme.colors.primary} />
+                    ) : (
+                      <View style={styles.uncheckDot} />
+                    )}
+                  </View>
+                  <Text style={[styles.modalidadTitle, modalidad === 'Eliminación directa' && styles.modalidadTitleActive]}>
+                    Eliminación Directa
+                  </Text>
+                  <Text style={styles.modalidadDesc}>
+                    Cuadro de llaves (brackets). El ganador avanza de ronda.
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Opción 2: Todos contra todos */}
+                <TouchableOpacity
+                  style={[
+                    styles.modalidadCard,
+                    modalidad === 'Todos contra todos' && styles.modalidadCardActive,
+                  ]}
+                  onPress={() => setModalidad('Todos contra todos')}
+                  activeOpacity={0.8}>
+                  <View style={styles.modalidadCardTop}>
+                    <Ionicons
+                      name="grid-outline"
+                      size={20}
+                      color={modalidad === 'Todos contra todos' ? SmashTheme.colors.secondary : SmashTheme.colors.onSurfaceVariant}
+                    />
+                    {modalidad === 'Todos contra todos' ? (
+                      <Ionicons name="checkmark-circle" size={18} color={SmashTheme.colors.secondary} />
+                    ) : (
+                      <View style={styles.uncheckDot} />
+                    )}
+                  </View>
+                  <Text style={[styles.modalidadTitle, modalidad === 'Todos contra todos' && styles.modalidadTitleActiveCyan]}>
+                    Liga / Grupos
+                  </Text>
+                  <Text style={styles.modalidadDesc}>
+                    Todos contra todos. Tabla por puntos y diferencia.
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Botón Acción Principal: Volt CTA */}
+            <TouchableOpacity
+              style={[styles.submitButton, cargando && { opacity: 0.7 }]}
+              onPress={handleRegistrarJugadores}
+              activeOpacity={0.85}
+              disabled={cargando}>
+              {cargando ? (
+                <ActivityIndicator color={SmashTheme.colors.onPrimary} size="small" />
+              ) : (
+                <>
+                  <Text style={styles.submitButtonText}>Continuar: Inscribir Jugadores</Text>
+                  <Ionicons name="arrow-forward" size={18} color={SmashTheme.colors.onPrimary} />
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.72)',
-  },
   safeArea: {
     flex: 1,
+    backgroundColor: SmashTheme.colors.surface,
+  },
+  glowTop: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: SmashTheme.colors.primary,
+    opacity: 0.05,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: SmashTheme.colors.cardBorder,
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
+    gap: 12,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitleContainer: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: SmashTheme.colors.onSurface,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: SmashTheme.colors.onSurfaceVariant,
+    marginTop: 1,
   },
   keyboardView: {
     flex: 1,
   },
   scrollContainer: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingTop: 16,
-    paddingBottom: 100,
-    alignItems: 'stretch',
+    paddingBottom: 40,
   },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: 20,
-    alignSelf: 'flex-start',
-  },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  cardContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 24,
-    padding: 22,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  mainTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#0f172a',
-    textAlign: 'center',
-    marginBottom: 24,
-    letterSpacing: -0.5,
+  formCard: {
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    padding: 18,
   },
   formGroup: {
     marginBottom: 16,
   },
-  label: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 6,
-  },
-  textInput: {
-    backgroundColor: '#f8fafc',
-    borderWidth: 1.5,
-    borderColor: '#cbd5e1',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#0f172a',
-  },
-  modalitySection: {
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  modalityTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 12,
-  },
-  modalityButtonsContainer: {
+  labelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 10,
-  },
-  modalityButton: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 6,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    marginBottom: 6,
   },
-  modalityButtonSelected: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
-  },
-  modalityIcon: {
-    marginRight: 6,
-  },
-  modalityButtonText: {
-    fontSize: 12.5,
+  label: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#2563eb',
-    textAlign: 'center',
+    color: SmashTheme.colors.onSurface,
+    marginBottom: 6,
   },
-  modalityButtonTextSelected: {
-    color: '#ffffff',
-  },
-  submitButton: {
-    backgroundColor: '#16a34a',
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+  badgeOfficial: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    elevation: 4,
-    shadowColor: '#16a34a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    gap: 4,
+    backgroundColor: 'rgba(76, 215, 246, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
-  submitButtonText: {
-    color: '#ffffff',
-    fontSize: 17,
+  badgeOfficialText: {
+    fontSize: 10,
     fontWeight: '800',
-    textAlign: 'center',
+    color: SmashTheme.colors.secondary,
+    letterSpacing: 0.5,
   },
-  formRow: {
-    flexDirection: 'row',
-    marginBottom: 10,
-  },
-  labelWithIcon: {
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    marginBottom: 8,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    paddingHorizontal: 12,
+    height: 48,
   },
-  quickButtonsRow: {
+  inputIcon: {
+    marginRight: 8,
+  },
+  textInput: {
+    flex: 1,
+    color: SmashTheme.colors.onSurface,
+    fontSize: 13,
+    height: '100%',
+  },
+  segmentedContainer: {
+    flexDirection: 'row',
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
+    borderRadius: 14,
+    padding: 4,
+    gap: 4,
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
     flexDirection: 'row',
     gap: 6,
-    marginTop: 6,
-    flexWrap: 'wrap',
   },
-  quickDateButton: {
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
+  segmentBtnActive: {
+    backgroundColor: SmashTheme.colors.surfaceContainerHigh,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  quickDateButtonActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+  segmentActiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: SmashTheme.colors.primary,
   },
-  quickDateText: {
-    fontSize: 11,
-    color: '#2563eb',
+  segmentBtnText: {
+    fontSize: 12,
     fontWeight: '600',
+    color: SmashTheme.colors.onSurfaceVariant,
   },
-  quickDateTextActive: {
-    color: '#ffffff',
+  segmentBtnTextActive: {
+    color: SmashTheme.colors.primary,
+    fontWeight: '800',
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  halfCol: {
+    flex: 1,
+  },
+  modalidadCardsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalidadCard: {
+    flex: 1,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: SmashTheme.colors.cardBorder,
+    padding: 12,
+  },
+  modalidadCardActive: {
+    borderColor: SmashTheme.colors.primary,
+    backgroundColor: 'rgba(195, 244, 0, 0.05)',
+  },
+  modalidadCardActiveCyan: {
+    borderColor: SmashTheme.colors.secondary,
+    backgroundColor: 'rgba(76, 215, 246, 0.05)',
+  },
+  badgeRankOfficial: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(195, 244, 0, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.borderVolt,
+  },
+  badgeRankOfficialText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: SmashTheme.colors.primary,
+    letterSpacing: 0.3,
+  },
+  modalidadCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  uncheckDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.outline,
+  },
+  modalidadTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: SmashTheme.colors.onSurface,
+    marginBottom: 4,
+  },
+  modalidadTitleActive: {
+    color: SmashTheme.colors.primary,
+  },
+  modalidadTitleActiveCyan: {
+    color: SmashTheme.colors.secondary,
+  },
+  modalidadDesc: {
+    fontSize: 10,
+    color: SmashTheme.colors.onSurfaceVariant,
+    lineHeight: 14,
+  },
+  submitButton: {
+    backgroundColor: SmashTheme.colors.primary,
+    borderRadius: 14,
+    height: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    shadowColor: SmashTheme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  submitButtonText: {
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

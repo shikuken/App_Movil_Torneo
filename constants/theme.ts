@@ -1,41 +1,75 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Smash Match Design System Tokens (Stitch Mockup Aesthetic)
+ * High-Tech Athleticism Dark Mode
  */
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+export const SmashTheme = {
+  colors: {
+    surface: '#0d1320',
+    surfaceDim: '#0d1320',
+    surfaceBright: '#333948',
+    surfaceContainerLowest: '#080e1b',
+    surfaceContainerLow: '#161b29',
+    surfaceContainer: '#1a1f2d',
+    surfaceContainerHigh: '#242a38',
+    surfaceContainerHighest: '#2f3543',
+    onSurface: '#dde2f5',
+    onSurfaceVariant: '#94a3b8',
+    outline: '#2f3543',
+    outlineVariant: '#444933',
+    // Volt neón deportivo (Kinetic Volt)
+    primary: '#c3f400',
+    primaryContainer: '#c3f400',
+    onPrimary: '#161e00',
+    onPrimaryContainer: '#556d00',
+    // Cyber Cyan
+    secondary: '#4cd7f6',
+    secondaryContainer: '#03b5d3',
+    onSecondary: '#003640',
+    // Estados y Alertas
+    liveRed: '#ff3b30',
+    error: '#ffb4ab',
+    errorContainer: '#93000a',
+    onError: '#690005',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
+    borderVolt: 'rgba(195, 244, 0, 0.4)',
+    glowVolt: 'rgba(195, 244, 0, 0.25)',
+  },
+  round: {
+    sm: 4,
+    md: 8,
+    lg: 12,
+    xl: 16,
+    full: 9999,
+  },
+};
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: '#dde2f5',
+    background: '#0d1320',
+    tint: '#c3f400',
+    icon: '#94a3b8',
+    tabIconDefault: '#94a3b8',
+    tabIconSelected: '#c3f400',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: '#dde2f5',
+    background: '#0d1320',
+    tint: '#c3f400',
+    icon: '#94a3b8',
+    tabIconDefault: '#94a3b8',
+    tabIconSelected: '#c3f400',
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
@@ -45,9 +79,9 @@ export const Fonts = Platform.select({
     mono: 'monospace',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sans: "Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, sans-serif",
+    mono: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   },
 });

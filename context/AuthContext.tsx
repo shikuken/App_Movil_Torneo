@@ -1,7 +1,14 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
+import {
+  isSessionExpired,
+  clearSessionTimestamps,
+  updateLastActive,
+  storeLoginTimestamp,
+} from '../utils/session';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -31,12 +38,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [perfil, setPerfil] = useState<PerfilUsuario | null>(null);
   const [cargandoAuth, setCargandoAuth] = useState(true);
+  const appState = useRef<AppStateStatus>((AppState.currentState ?? 'active') as AppStateStatus);
 
   useEffect(() => {
     // Escucha el estado de autenticación en la nube en tiempo real
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
       if (currentUser) {
+        // ── Verificar si la sesión ha expirado ──
+        const expired = await isSessionExpired();
+        if (expired) {
+          console.log('Sesión expirada. Cerrando sesión automáticamente...');
+          await signOut(auth);
+          await clearSessionTimestamps();
+          setUser(null);
+          setPerfil(null);
+          setCargandoAuth(false);
+          return;
+        }
+
+        // Sesión válida: actualizar último timestamp de actividad
+        await updateLastActive();
+        setUser(currentUser);
+
         try {
           // Carga el perfil del usuario desde Cloud Firestore si existe
           const docRef = doc(db, 'usuarios', currentUser.uid);
@@ -51,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setPerfil({ uid: currentUser.uid, email: currentUser.email });
         }
       } else {
+        setUser(null);
         setPerfil(null);
       }
       setCargandoAuth(false);
@@ -59,7 +83,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
+  // ── Listener de AppState: verifica sesión cuando la app vuelve al foreground ──
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      // La app pasó de background/inactive a active (foreground)
+      if (
+        appState.current.match(/inactive|background/) &&
+        nextAppState === 'active'
+      ) {
+        if (auth.currentUser) {
+          const expired = await isSessionExpired();
+          if (expired) {
+            console.log('Sesión expirada al volver al foreground. Cerrando sesión...');
+            await signOut(auth);
+            await clearSessionTimestamps();
+            // onAuthStateChanged se disparará y limpiará user/perfil
+          } else {
+            // Sesión aún válida: actualizar timestamp de actividad
+            await updateLastActive();
+          }
+        }
+      }
+
+      // La app va a background: guardar timestamp de última actividad
+      if (nextAppState.match(/inactive|background/) && auth.currentUser) {
+        await updateLastActive();
+      }
+
+      appState.current = nextAppState;
+    };
+
+    // En web no tenemos AppState de la misma manera, pero funciona para móvil
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   const logout = async () => {
+    await clearSessionTimestamps();
     await signOut(auth);
   };
 

@@ -27,13 +27,17 @@ import {
   deleteDoc,
   getDocs,
   serverTimestamp,
+  increment,
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
+import { SmashTheme } from '../constants/theme';
 
 interface JugadorInfo {
   id: string;
   nombre: string;
   club?: string;
+  usuarioId?: string | null;
+  email?: string | null;
 }
 
 interface SiguienteDestino {
@@ -81,6 +85,7 @@ export default function DesarrolloTorneoScreen() {
     torneoId?: string;
     nombreTorneo?: string;
     modalidad?: string;
+    tipoTorneo?: string;
     esPropietario?: string;
   }>();
 
@@ -91,12 +96,16 @@ export default function DesarrolloTorneoScreen() {
     nombreTorneo: string;
     modalidad: string;
     usuarioId: string;
+    tipoTorneo?: string;
+    puntosAsignados?: boolean;
     categoria?: string;
     organizador?: string;
     lugarSede?: string;
   }>({
     nombreTorneo: params.nombreTorneo || 'Desarrollo del Torneo',
     modalidad: params.modalidad || 'Eliminación directa',
+    tipoTorneo: params.tipoTorneo || 'amistoso',
+    puntosAsignados: false,
     usuarioId: '',
   });
 
@@ -132,6 +141,8 @@ export default function DesarrolloTorneoScreen() {
         setTorneo({
           nombreTorneo: d.nombreTorneo || params.nombreTorneo || 'Torneo',
           modalidad: d.modalidad || params.modalidad || 'Eliminación directa',
+          tipoTorneo: d.tipoTorneo || params.tipoTorneo || 'amistoso',
+          puntosAsignados: d.puntosAsignados || false,
           usuarioId: d.usuarioId || '',
           categoria: d.categoria || '',
           organizador: d.organizador || '',
@@ -155,6 +166,8 @@ export default function DesarrolloTorneoScreen() {
           id: docSnap.id,
           nombre: d.nombre || 'Jugador',
           club: d.club || '',
+          usuarioId: d.usuarioId || null,
+          email: d.email || null,
         });
       });
       setJugadores(list);
@@ -964,7 +977,7 @@ export default function DesarrolloTorneoScreen() {
   };
 
   // ─────────────────────────────────────────────────────────────
-  //  DETECCIÓN DE CAMPEÓN DEL TORNEO (Todos los modos)
+  //  DETECCIÓN DE CAMPEÓN Y PODIO DEL TORNEO (Todos los modos)
   // ─────────────────────────────────────────────────────────────
   let campeonFinal: string | null = null;
   let campeonDetalle: string | null = null;
@@ -1009,39 +1022,128 @@ export default function DesarrolloTorneoScreen() {
     }
   }
 
+  // 4. Cálculo de los 3 primeros puestos (Podio)
+  const calcularPodio = () => {
+    let primero: JugadorInfo | null = null;
+    let segundo: JugadorInfo | null = null;
+    let tercero: JugadorInfo | null = null;
+
+    if (partidoFinal && partidoFinal.estado === 'finalizado' && partidoFinal.ganadorId) {
+      const gId = partidoFinal.ganadorId;
+      primero = gId === partidoFinal.jugador1?.id ? partidoFinal.jugador1 : partidoFinal.jugador2;
+      segundo = gId === partidoFinal.jugador1?.id ? partidoFinal.jugador2 : partidoFinal.jugador1;
+
+      // Buscar perdedor de semifinales para el 3er puesto
+      const semis = partidos.filter((p) => p.ronda.toLowerCase().includes('semifinal'));
+      if (semis.length > 0) {
+        const perdedores: JugadorInfo[] = [];
+        semis.forEach((s) => {
+          if (s.estado === 'finalizado' && s.ganadorId) {
+            const p = s.ganadorId === s.jugador1?.id ? s.jugador2 : s.jugador1;
+            if (p) perdedores.push(p);
+          }
+        });
+        if (perdedores.length > 0) tercero = perdedores[0];
+      } else if (jugadores.length >= 3) {
+        const restantes = jugadores.filter((j) => j.id !== primero?.id && j.id !== segundo?.id);
+        if (restantes.length > 0) tercero = restantes[0];
+      }
+    } else if (tieneTriangular && posTriangular.length >= 2) {
+      const findJ = (id: string) => jugadores.find((j) => j.id === id) || null;
+      if (posTriangular.length > 0) primero = findJ(posTriangular[0].id) || { id: posTriangular[0].id, nombre: posTriangular[0].nombre };
+      if (posTriangular.length > 1) segundo = findJ(posTriangular[1].id) || { id: posTriangular[1].id, nombre: posTriangular[1].nombre };
+      if (posTriangular.length > 2) tercero = findJ(posTriangular[2].id) || { id: posTriangular[2].id, nombre: posTriangular[2].nombre };
+    } else if (torneo.modalidad === 'Todos contra todos') {
+      const tabla = calcularPosiciones();
+      const findJ = (id: string) => jugadores.find((j) => j.id === id) || null;
+      if (tabla.length > 0 && tabla[0].pj > 0) primero = findJ(tabla[0].id) || { id: tabla[0].id, nombre: tabla[0].nombre };
+      if (tabla.length > 1 && tabla[1].pj > 0) segundo = findJ(tabla[1].id) || { id: tabla[1].id, nombre: tabla[1].nombre };
+      if (tabla.length > 2 && tabla[2].pj > 0) tercero = findJ(tabla[2].id) || { id: tabla[2].id, nombre: tabla[2].nombre };
+    }
+
+    return { primero, segundo, tercero };
+  };
+
+  const podioActual = calcularPodio();
+
+  // Asignar puntos de ranking a los 3 primeros puestos
+  const handleAsignarPuntosRanking = async () => {
+    if (!podioActual.primero) {
+      Alert.alert('Torneo no concluido', 'Aún no se ha determinado el ganador del torneo.');
+      return;
+    }
+
+    setGenerando(true);
+    try {
+      const sumarPuntos = async (jInfo: JugadorInfo | null, pts: number, puesto: 1 | 2 | 3) => {
+        if (!jInfo) return;
+        const jCompleto = jugadores.find((j) => j.id === jInfo.id) || jInfo;
+        if (!jCompleto.usuarioId) return;
+
+        const userDocRef = doc(db, 'usuarios', jCompleto.usuarioId);
+        await updateDoc(userDocRef, {
+          puntosRanking: increment(pts),
+          torneosJugados: increment(1),
+          ...(puesto === 1 ? { primerosPuestos: increment(1), torneosGanados: increment(1) } : {}),
+          ...(puesto === 2 ? { segundosPuestos: increment(1) } : {}),
+          ...(puesto === 3 ? { tercerosPuestos: increment(1) } : {}),
+        });
+      };
+
+      // 1er Puesto: 3 puntos, 2do Puesto: 2 puntos, 3er Puesto: 1 punto
+      await sumarPuntos(podioActual.primero, 3, 1);
+      await sumarPuntos(podioActual.segundo, 2, 2);
+      await sumarPuntos(podioActual.tercero, 1, 3);
+
+      await updateDoc(doc(db, 'torneos', torneoId), {
+        estado: 'finalizado',
+        puntosAsignados: true,
+      });
+
+      setTorneo((prev) => ({ ...prev, puntosAsignados: true }));
+
+      Alert.alert(
+        '🏆 ¡Puntos de Ranking Asignados!',
+        `Se han sumado los puntos a los 3 primeros puestos:\n\n🥇 1° Lugar (${podioActual.primero.nombre}): +3 pts\n🥈 2° Lugar (${podioActual.segundo?.nombre || 'N/A'}): +2 pts\n🥉 3° Lugar (${podioActual.tercero?.nombre || 'N/A'}): +1 pt\n\nLos puntajes ya están actualizados en el Ranking Oficial.`,
+        [
+          { text: 'Ver Ranking Oficial', onPress: () => router.push('/ranking' as any) },
+          { text: 'Aceptar' },
+        ]
+      );
+    } catch (err: any) {
+      console.error('Error al asignar puntos:', err);
+      Alert.alert('Error', err.message || 'No se pudieron asignar los puntos de ranking.');
+    } finally {
+      setGenerando(false);
+    }
+  };
+
 
   return (
-    <ImageBackground
-      source={{
-        uri: 'https://images.unsplash.com/photo-1534158914592-062992fbe900?auto=format&fit=crop&w=1200&q=80',
-      }}
-      style={styles.backgroundImage}
-      resizeMode="cover">
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar barStyle="light-content" />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" />
+      <View style={styles.glowTop} pointerEvents="none" />
 
-          {/* Encabezado fijo */}
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-              activeOpacity={0.7}>
-              <Ionicons name="arrow-back" size={20} color="#ffffff" />
-              <Text style={styles.backButtonText}>Volver</Text>
-            </TouchableOpacity>
+      {/* Encabezado fijo */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={20} color={SmashTheme.colors.onSurface} />
+        </TouchableOpacity>
 
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                Desarrollo del Torneo
-              </Text>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {torneo.nombreTorneo}
-              </Text>
-            </View>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            Desarrollo del Torneo
+          </Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
+            {torneo.nombreTorneo}
+          </Text>
+        </View>
 
-            <View style={{ width: 70 }} />
-          </View>
+        <View style={{ width: 40 }} />
+      </View>
 
           <ScrollView
             contentContainerStyle={styles.scrollContent}
@@ -1057,6 +1159,26 @@ export default function DesarrolloTorneoScreen() {
                     {torneo.nombreTorneo}
                   </Text>
                   <View style={styles.badgesRow}>
+                    {/* Badge Tipo de Torneo */}
+                    <View style={[
+                      styles.badgeTipo,
+                      torneo.tipoTorneo === 'clasificatorio'
+                        ? { backgroundColor: 'rgba(195, 244, 0, 0.15)', borderColor: SmashTheme.colors.borderVolt }
+                        : { backgroundColor: 'rgba(76, 215, 246, 0.12)', borderColor: 'rgba(76, 215, 246, 0.3)' }
+                    ]}>
+                      <Ionicons
+                        name={torneo.tipoTorneo === 'clasificatorio' ? 'ribbon' : 'tennisball-outline'}
+                        size={11}
+                        color={torneo.tipoTorneo === 'clasificatorio' ? SmashTheme.colors.primary : SmashTheme.colors.secondary}
+                      />
+                      <Text style={[
+                        styles.badgeTipoText,
+                        { color: torneo.tipoTorneo === 'clasificatorio' ? SmashTheme.colors.primary : SmashTheme.colors.secondary }
+                      ]}>
+                        {torneo.tipoTorneo === 'clasificatorio' ? 'Clasificatorio (Ranking)' : 'Amistoso'}
+                      </Text>
+                    </View>
+
                     <View style={styles.badgeModality}>
                       <Text style={styles.badgeModalityText}>{torneo.modalidad}</Text>
                     </View>
@@ -1080,6 +1202,106 @@ export default function DesarrolloTorneoScreen() {
                       <Text style={styles.championSubtitle}>{campeonDetalle}</Text>
                     ) : null}
                   </View>
+                </View>
+              )}
+
+              {/* Podio Oficial y Puntos de Ranking */}
+              {campeonFinal && podioActual.primero && (
+                <View style={styles.podioContainer}>
+                  <View style={styles.podioHeader}>
+                    <Ionicons name="podium" size={18} color={SmashTheme.colors.primary} />
+                    <Text style={styles.podioHeaderTitle}>
+                      {torneo.tipoTorneo === 'clasificatorio' ? 'PODIO OFICIAL — PUNTOS DE RANKING' : 'PODIO DE HONOR DEL TORNEO'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.podioCardsRow}>
+                    {/* 1° Lugar */}
+                    <View style={[styles.podioCol, styles.podioCol1]}>
+                      <Text style={styles.podioMedal}>🥇</Text>
+                      <Text style={styles.podioPuestoText}>1° LUGAR</Text>
+                      <Text style={styles.podioNombreText} numberOfLines={1}>
+                        {podioActual.primero.nombre}
+                      </Text>
+                      {torneo.tipoTorneo === 'clasificatorio' && (
+                        <View style={styles.podioPtsBadge}>
+                          <Text style={styles.podioPtsText}>+3 PTS</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* 2° Lugar */}
+                    {podioActual.segundo && (
+                      <View style={[styles.podioCol, styles.podioCol2]}>
+                        <Text style={styles.podioMedal}>🥈</Text>
+                        <Text style={styles.podioPuestoText}>2° LUGAR</Text>
+                        <Text style={styles.podioNombreText} numberOfLines={1}>
+                          {podioActual.segundo.nombre}
+                        </Text>
+                        {torneo.tipoTorneo === 'clasificatorio' && (
+                          <View style={styles.podioPtsBadgeCyan}>
+                            <Text style={styles.podioPtsTextCyan}>+2 PTS</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* 3° Lugar */}
+                    {podioActual.tercero && (
+                      <View style={[styles.podioCol, styles.podioCol3]}>
+                        <Text style={styles.podioMedal}>🥉</Text>
+                        <Text style={styles.podioPuestoText}>3° LUGAR</Text>
+                        <Text style={styles.podioNombreText} numberOfLines={1}>
+                          {podioActual.tercero.nombre}
+                        </Text>
+                        {torneo.tipoTorneo === 'clasificatorio' && (
+                          <View style={styles.podioPtsBadgeAmber}>
+                            <Text style={styles.podioPtsTextAmber}>+1 PTO</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Acciones de Ranking en Torneos Clasificatorios */}
+                  {torneo.tipoTorneo === 'clasificatorio' && (
+                    <View style={styles.rankingActionsBox}>
+                      {!torneo.puntosAsignados ? (
+                        esPropietario ? (
+                          <TouchableOpacity
+                            style={[styles.btnAsignarPuntos, generando && { opacity: 0.7 }]}
+                            onPress={handleAsignarPuntosRanking}
+                            disabled={generando}
+                            activeOpacity={0.85}>
+                            <Ionicons name="sparkles" size={18} color="#161e00" />
+                            <Text style={styles.btnAsignarPuntosText}>
+                              {generando ? 'Guardando Puntos...' : 'Asignar Puntos al Ranking (+3, +2, +1 pts)'}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <Text style={styles.rankingPendingNotice}>
+                            El organizador aún no ha confirmado la asignación de puntos.
+                          </Text>
+                        )
+                      ) : (
+                        <View style={styles.puntosAsignadosBadge}>
+                          <Ionicons name="checkmark-done-circle" size={18} color={SmashTheme.colors.primary} />
+                          <Text style={styles.puntosAsignadosText}>
+                            Puntos del torneo acreditados al Ranking Oficial de Jugadores (+3, +2, +1 pts)
+                          </Text>
+                        </View>
+                      )}
+
+                      <TouchableOpacity
+                        style={styles.verRankingBtn}
+                        onPress={() => router.push('/ranking' as any)}
+                        activeOpacity={0.8}>
+                        <Ionicons name="podium-outline" size={16} color={SmashTheme.colors.secondary} />
+                        <Text style={styles.verRankingBtnText}>Ver Tabla de Ranking Oficial</Text>
+                        <Ionicons name="arrow-forward" size={14} color={SmashTheme.colors.secondary} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -1195,8 +1417,15 @@ export default function DesarrolloTorneoScreen() {
                           key={pos.id}
                           style={[
                             styles.standingsRow,
-                            idx % 2 === 0 && { backgroundColor: '#f8fafc' },
-                            idx === 0 && { backgroundColor: '#fef3c7' },
+                            idx === 0
+                              ? styles.standingsRowGold
+                              : idx === 1
+                                ? styles.standingsRowSilver
+                                : idx === 2
+                                  ? styles.standingsRowBronze
+                                  : idx % 2 === 0
+                                    ? styles.standingsRowEven
+                                    : null,
                           ]}>
                           <Text style={[styles.standingsCell, { width: 34, textAlign: 'center', fontWeight: '700' }]}>
                             {medal}
@@ -1246,15 +1475,15 @@ export default function DesarrolloTorneoScreen() {
 
                     // Icono y color por nombre de ronda
                     const rondaMeta: Record<string, { icon: string; color: string; bg: string }> = {
-                      'Octavos de Final':  { icon: 'grid-outline',      color: '#0891b2', bg: '#ecfeff' },
-                      'Cuartos de Final':  { icon: 'apps-outline',      color: '#7c3aed', bg: '#f5f3ff' },
-                      'Semifinal':         { icon: 'git-branch-outline', color: '#d97706', bg: '#fffbeb' },
-                      'Gran Final':        { icon: 'trophy-outline',     color: '#dc2626', bg: '#fff1f2' },
-                      'Triangular Final':  { icon: 'git-compare-outline',color: '#7c3aed', bg: '#f5f3ff' },
-                      'Ronda 1':           { icon: 'layers-outline',     color: '#475569', bg: '#f1f5f9' },
-                      'Todos contra todos':{ icon: 'people-outline',     color: '#2563eb', bg: '#eff6ff' },
+                      'Octavos de Final':  { icon: 'grid-outline',       color: '#22d3ee', bg: 'rgba(34, 211, 238, 0.15)' },
+                      'Cuartos de Final':  { icon: 'apps-outline',       color: '#c084fc', bg: 'rgba(192, 132, 252, 0.15)' },
+                      'Semifinal':         { icon: 'git-branch-outline', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' },
+                      'Gran Final':        { icon: 'trophy-outline',     color: '#f87171', bg: 'rgba(248, 113, 113, 0.2)' },
+                      'Triangular Final':  { icon: 'git-compare-outline',color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
+                      'Ronda 1':           { icon: 'layers-outline',     color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' },
+                      'Todos contra todos':{ icon: 'people-outline',     color: '#818cf8', bg: 'rgba(129, 140, 248, 0.15)' },
                     };
-                    const metaDefault = { icon: 'tennisball-outline', color: '#475569', bg: '#f1f5f9' };
+                    const metaDefault = { icon: 'tennisball-outline', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' };
 
                     return (
                       <View style={{ gap: 20 }}>
@@ -1267,8 +1496,8 @@ export default function DesarrolloTorneoScreen() {
                           return (
                             <View key={rondaNombre}>
                               {/* ── Encabezado de Ronda ── */}
-                              <View style={[styles.roundHeader, { backgroundColor: meta.bg }]}>
-                                <View style={[styles.roundHeaderIcon, { borderColor: meta.color + '40' }]}>
+                              <View style={[styles.roundHeader, { backgroundColor: '#1a2337', borderColor: meta.color + '55' }]}>
+                                <View style={[styles.roundHeaderIcon, { backgroundColor: meta.bg, borderColor: meta.color + '40' }]}>
                                   <Ionicons name={meta.icon as any} size={18} color={meta.color} />
                                 </View>
                                 <View style={{ flex: 1 }}>
@@ -1288,7 +1517,7 @@ export default function DesarrolloTorneoScreen() {
                               {rondaNombre === 'Triangular Final' && posTriangular.length > 0 && (
                                 <View style={styles.inlineStandingsCard}>
                                   <View style={styles.inlineStandingsHeader}>
-                                    <Ionicons name="podium-outline" size={16} color="#7c3aed" />
+                                    <Ionicons name="podium-outline" size={16} color="#38bdf8" />
                                     <Text style={styles.inlineStandingsTitle}>
                                       Tabla en Vivo — Modo Todos contra todos
                                     </Text>
@@ -1300,7 +1529,7 @@ export default function DesarrolloTorneoScreen() {
                                     <Text style={[styles.standingsCol, { width: 32, textAlign: 'center' }]}>PG</Text>
                                     <Text style={[styles.standingsCol, { width: 32, textAlign: 'center' }]}>PP</Text>
                                     <Text style={[styles.standingsCol, { width: 42, textAlign: 'center' }]}>Sets</Text>
-                                    <Text style={[styles.standingsCol, { width: 36, textAlign: 'center', fontWeight: '800', color: '#7c3aed' }]}>Pts</Text>
+                                    <Text style={[styles.standingsCol, { width: 36, textAlign: 'center', fontWeight: '800', color: '#38bdf8' }]}>Pts</Text>
                                   </View>
                                   {posTriangular.map((pos, idx) => {
                                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}°`;
@@ -1309,8 +1538,15 @@ export default function DesarrolloTorneoScreen() {
                                         key={pos.id}
                                         style={[
                                           styles.standingsRow,
-                                          idx % 2 === 0 && { backgroundColor: '#f8fafc' },
-                                          idx === 0 && { backgroundColor: '#fef3c7' },
+                                          idx === 0
+                                            ? styles.standingsRowGold
+                                            : idx === 1
+                                              ? styles.standingsRowSilver
+                                              : idx === 2
+                                                ? styles.standingsRowBronze
+                                                : idx % 2 === 0
+                                                  ? styles.standingsRowEven
+                                                  : null,
                                         ]}>
                                         <Text style={[styles.standingsCell, { width: 34, textAlign: 'center', fontWeight: '700' }]}>{medal}</Text>
                                         <View style={{ flex: 1, paddingRight: 4 }}>
@@ -1323,7 +1559,7 @@ export default function DesarrolloTorneoScreen() {
                                         <Text style={[styles.standingsCell, { width: 32, textAlign: 'center', color: '#16a34a', fontWeight: '700' }]}>{pos.pg}</Text>
                                         <Text style={[styles.standingsCell, { width: 32, textAlign: 'center', color: '#dc2626' }]}>{pos.pp}</Text>
                                         <Text style={[styles.standingsCell, { width: 42, textAlign: 'center', fontSize: 11.5 }]}>{pos.sf}-{pos.sc}</Text>
-                                        <Text style={[styles.standingsCell, { width: 36, textAlign: 'center', fontWeight: '800', color: '#7c3aed' }]}>{pos.puntos}</Text>
+                                        <Text style={[styles.standingsCell, { width: 36, textAlign: 'center', fontWeight: '800', color: '#38bdf8' }]}>{pos.puntos}</Text>
                                       </View>
                                     );
                                   })}
@@ -1635,24 +1871,24 @@ export default function DesarrolloTorneoScreen() {
               </View>
             </View>
           </Modal>
-        </SafeAreaView>
-      </View>
-    </ImageBackground>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-  },
   safeArea: {
     flex: 1,
+    backgroundColor: SmashTheme.colors.surface,
+  },
+  glowTop: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: SmashTheme.colors.primary,
+    opacity: 0.05,
   },
   header: {
     flexDirection: 'row',
@@ -1660,47 +1896,50 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: SmashTheme.colors.cardBorder,
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
   },
   backButton: {
-    flexDirection: 'row',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     alignItems: 'center',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 20,
-    gap: 4,
-  },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 13.5,
-    fontWeight: '600',
+    justifyContent: 'center',
   },
   headerTitle: {
-    color: '#ffffff',
-    fontSize: 17,
+    color: SmashTheme.colors.onSurface,
+    fontSize: 16,
     fontWeight: '800',
     textAlign: 'center',
   },
   headerSubtitle: {
-    color: '#94a3b8',
+    color: SmashTheme.colors.primary,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
     textAlign: 'center',
+    marginTop: 1,
   },
   scrollContent: {
     paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 40,
   },
   statusCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
     borderRadius: 20,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
   },
   statusCardTop: {
     flexDirection: 'row',
@@ -1708,17 +1947,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   trophyIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fef3c7',
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.borderVolt,
     justifyContent: 'center',
     alignItems: 'center',
   },
   statusTournamentName: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
-    color: '#0f172a',
+    color: SmashTheme.colors.onSurface,
     marginBottom: 4,
   },
   badgesRow: {
@@ -1727,32 +1968,34 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   badgeModality: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: 'rgba(195, 244, 0, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(195, 244, 0, 0.25)',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   badgeModalityText: {
-    color: '#1d4ed8',
-    fontSize: 11.5,
+    color: SmashTheme.colors.primary,
+    fontSize: 11,
     fontWeight: '700',
   },
   badgePlayers: {
-    backgroundColor: '#f0fdf4',
+    backgroundColor: 'rgba(76, 215, 246, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   badgePlayersText: {
-    color: '#16a34a',
-    fontSize: 11.5,
+    color: SmashTheme.colors.secondary,
+    fontSize: 11,
     fontWeight: '700',
   },
   championBanner: {
     marginTop: 12,
-    backgroundColor: '#fffbeb',
+    backgroundColor: 'rgba(195, 244, 0, 0.12)',
     borderWidth: 1.5,
-    borderColor: '#f59e0b',
+    borderColor: SmashTheme.colors.primary,
     borderRadius: 14,
     padding: 12,
     flexDirection: 'row',
@@ -1762,23 +2005,25 @@ const styles = StyleSheet.create({
   championTitle: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#b45309',
+    color: SmashTheme.colors.primary,
     letterSpacing: 0.5,
   },
   championName: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#0f172a',
+    color: '#ffffff',
   },
   championSubtitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#92400e',
+    color: SmashTheme.colors.secondary,
     marginTop: 2,
   },
   emptyCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     padding: 28,
     alignItems: 'center',
     gap: 8,
@@ -1786,17 +2031,17 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#1e293b',
+    color: SmashTheme.colors.onSurface,
     marginTop: 6,
   },
   emptyDesc: {
-    fontSize: 13.5,
-    color: '#64748b',
+    fontSize: 13,
+    color: SmashTheme.colors.onSurfaceVariant,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 19,
   },
   generateButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: SmashTheme.colors.primary,
     borderRadius: 14,
     paddingVertical: 13,
     paddingHorizontal: 20,
@@ -1806,16 +2051,19 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   generateButtonText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '700',
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 14,
+    fontWeight: '800',
   },
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     padding: 4,
     marginBottom: 14,
+    gap: 4,
   },
   tabButton: {
     flex: 1,
@@ -1827,50 +2075,50 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   tabButtonActive: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: SmashTheme.colors.surfaceContainerHigh,
   },
   tabButtonText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#64748b',
+    color: SmashTheme.colors.onSurfaceVariant,
   },
   tabButtonTextActive: {
-    color: '#2563eb',
-    fontWeight: '700',
+    color: SmashTheme.colors.primary,
+    fontWeight: '800',
   },
   standingsBannerTriangular: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#fffbeb',
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
     borderBottomWidth: 1,
-    borderBottomColor: '#fef3c7',
+    borderBottomColor: SmashTheme.colors.cardBorder,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   standingsBannerTriangularTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    color: '#b45309',
+    color: SmashTheme.colors.primary,
   },
   standingsBannerTriangularSub: {
     fontSize: 11,
-    color: '#92400e',
+    color: SmashTheme.colors.onSurfaceVariant,
     fontWeight: '500',
   },
   inlineStandingsCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    backgroundColor: '#161f33',
     borderRadius: 16,
     overflow: 'hidden',
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderWidth: 1.5,
-    borderColor: '#e9d5ff',
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
-    marginBottom: 4,
+    borderColor: 'rgba(76, 215, 246, 0.35)',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 4,
   },
   inlineStandingsHeader: {
     flexDirection: 'row',
@@ -1878,32 +2126,40 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#faf5ff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3e8ff',
+    backgroundColor: '#1e2840',
+    borderBottomWidth: 1.5,
+    borderBottomColor: 'rgba(76, 215, 246, 0.3)',
   },
   inlineStandingsTitle: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: '800',
-    color: '#7c3aed',
+    color: SmashTheme.colors.secondary,
   },
   standingsCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.97)',
+    backgroundColor: '#161f33',
     borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(76, 215, 246, 0.35)',
     overflow: 'hidden',
-    paddingVertical: 8,
+    paddingVertical: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 5,
   },
   standingsHeaderRow: {
     flexDirection: 'row',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    paddingVertical: 9,
+    backgroundColor: '#202a42',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(76, 215, 246, 0.4)',
   },
   standingsCol: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '800',
+    color: SmashTheme.colors.primary,
   },
   standingsRow: {
     flexDirection: 'row',
@@ -1911,38 +2167,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  standingsRowGold: {
+    backgroundColor: 'rgba(195, 244, 0, 0.16)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#c3f400',
+  },
+  standingsRowSilver: {
+    backgroundColor: 'rgba(76, 215, 246, 0.14)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#4cd7f6',
+  },
+  standingsRowBronze: {
+    backgroundColor: 'rgba(245, 158, 11, 0.14)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  standingsRowEven: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
   },
   standingsCell: {
-    fontSize: 13,
-    color: '#1e293b',
+    fontSize: 12,
+    color: '#f1f5f9',
   },
   standingsPlayerName: {
-    fontSize: 13.5,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#ffffff',
   },
   standingsPlayerClub: {
     fontSize: 11,
-    color: '#64748b',
+    color: SmashTheme.colors.onSurfaceVariant,
   },
   matchesList: {
     gap: 12,
   },
   matchCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.97)',
+    backgroundColor: '#172033',
     borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     padding: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 4,
   },
   matchCardLocked: {
-    opacity: 0.72,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    opacity: 0.5,
     borderStyle: 'dashed',
   },
   roundHeader: {
@@ -1952,13 +2226,15 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    backgroundColor: '#1a2337',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   roundHeaderIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1969,42 +2245,41 @@ const styles = StyleSheet.create({
   },
   roundHeaderSub: {
     fontSize: 11,
-    color: '#64748b',
+    color: SmashTheme.colors.onSurfaceVariant,
     fontWeight: '500',
     marginTop: 1,
   },
   matchPlayerClub: {
-    fontSize: 10.5,
-    color: '#94a3b8',
+    fontSize: 10,
+    color: SmashTheme.colors.onSurfaceVariant,
     textAlign: 'center',
     marginTop: 1,
   },
   statusPillLocked: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: SmashTheme.colors.cardBorder,
     borderStyle: 'dashed',
   },
   statusPillTextLocked: {
-    color: '#94a3b8',
+    color: SmashTheme.colors.onSurfaceVariant,
   },
   advanceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     marginTop: 8,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: 'rgba(195, 244, 0, 0.1)',
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 5,
   },
   advanceText: {
-    fontSize: 11.5,
-    color: '#16a34a',
+    fontSize: 11,
+    color: SmashTheme.colors.primary,
     fontWeight: '600',
     flex: 1,
   },
-
   matchCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2012,106 +2287,277 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   matchNumberBadge: {
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
   },
   matchNumberText: {
-    color: '#2563eb',
     fontSize: 11,
     fontWeight: '700',
   },
   matchRoundText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#334155',
+    color: SmashTheme.colors.onSurface,
   },
   statusPill: {
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 8,
   },
   statusPillFinished: {
-    backgroundColor: '#f0fdf4',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
   },
   statusPillPending: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: SmashTheme.colors.cardBorder,
   },
   statusPillText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
   },
   statusPillTextFinished: {
-    color: '#16a34a',
+    color: '#10b981',
   },
   statusPillTextPending: {
-    color: '#64748b',
+    color: SmashTheme.colors.onSurfaceVariant,
   },
   triangularBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#f5f3ff',
+    backgroundColor: 'rgba(76, 215, 246, 0.12)',
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 5,
     marginBottom: 8,
   },
   triangularBannerText: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '700',
-    color: '#7c3aed',
+    color: SmashTheme.colors.secondary,
   },
   matchVersusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
+    backgroundColor: '#20293d',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingVertical: 10,
     paddingHorizontal: 8,
   },
-
   playerSide: {
     flex: 1,
     alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    borderRadius: 10,
   },
   playerSideWinner: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderRadius: 8,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(195, 244, 0, 0.16)',
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.borderVolt,
   },
   matchPlayerName: {
-    fontSize: 13.5,
-    fontWeight: '600',
-    color: '#1e293b',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
     textAlign: 'center',
   },
   matchPlayerNameWinner: {
     fontWeight: '800',
-    color: '#0f172a',
+    color: SmashTheme.colors.primary,
   },
   scoreContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    backgroundColor: '#0c1220',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 10,
     paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginHorizontal: 4,
   },
   scoreDigit: {
     fontSize: 20,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontWeight: '900',
+    color: SmashTheme.colors.primary,
   },
   scoreSeparator: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#94a3b8',
+    color: SmashTheme.colors.onSurfaceVariant,
+  },
+  badgeTipo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  badgeTipoText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  podioContainer: {
+    marginTop: 14,
+    backgroundColor: '#161f33',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(195, 244, 0, 0.3)',
+    padding: 14,
+  },
+  podioHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  podioHeaderTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: SmashTheme.colors.primary,
+    letterSpacing: 0.5,
+  },
+  podioCardsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  podioCol: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderWidth: 1.5,
+  },
+  podioCol1: {
+    backgroundColor: 'rgba(195, 244, 0, 0.12)',
+    borderColor: SmashTheme.colors.primary,
+  },
+  podioCol2: {
+    backgroundColor: 'rgba(76, 215, 246, 0.1)',
+    borderColor: SmashTheme.colors.secondary,
+  },
+  podioCol3: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderColor: '#f59e0b',
+  },
+  podioMedal: {
+    fontSize: 22,
+    marginBottom: 2,
+  },
+  podioPuestoText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: SmashTheme.colors.onSurfaceVariant,
+    letterSpacing: 0.5,
+  },
+  podioNombreText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#ffffff',
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  podioPtsBadge: {
+    marginTop: 6,
+    backgroundColor: SmashTheme.colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  podioPtsText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: SmashTheme.colors.onPrimary,
+  },
+  podioPtsBadgeCyan: {
+    marginTop: 6,
+    backgroundColor: SmashTheme.colors.secondary,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  podioPtsTextCyan: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: SmashTheme.colors.onSecondary,
+  },
+  podioPtsBadgeAmber: {
+    marginTop: 6,
+    backgroundColor: '#f59e0b',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  podioPtsTextAmber: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  rankingActionsBox: {
+    marginTop: 12,
+    gap: 8,
+  },
+  btnAsignarPuntos: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: SmashTheme.colors.primary,
+    borderRadius: 12,
+    height: 44,
+  },
+  btnAsignarPuntosText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: SmashTheme.colors.onPrimary,
+  },
+  rankingPendingNotice: {
+    fontSize: 11,
+    color: SmashTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  puntosAsignadosBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(195, 244, 0, 0.1)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.borderVolt,
+    padding: 10,
+  },
+  puntosAsignadosText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: SmashTheme.colors.primary,
+    flex: 1,
+  },
+  verRankingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  verRankingBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: SmashTheme.colors.secondary,
   },
   pointsDetailText: {
-    fontSize: 11.5,
-    color: '#64748b',
+    fontSize: 11,
+    color: SmashTheme.colors.secondary,
     marginTop: 6,
     textAlign: 'center',
     fontStyle: 'italic',
@@ -2121,17 +2567,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderWidth: 1,
-    borderColor: '#bfdbfe',
+    borderColor: SmashTheme.colors.borderVolt,
     borderRadius: 10,
     paddingVertical: 8,
     marginTop: 10,
   },
   recordScoreButtonText: {
-    color: '#2563eb',
-    fontSize: 12.5,
-    fontWeight: '700',
+    color: SmashTheme.colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
   },
   resetFixtureButton: {
     flexDirection: 'row',
@@ -2142,26 +2588,28 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   resetFixtureButtonText: {
-    color: '#94a3b8',
-    fontSize: 13,
+    color: SmashTheme.colors.onSurfaceVariant,
+    fontSize: 12,
     fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     width: '100%',
     maxWidth: 440,
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.5,
     shadowRadius: 15,
     elevation: 10,
   },
@@ -2174,11 +2622,11 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#0f172a',
+    color: SmashTheme.colors.onSurface,
   },
   modalMatchInfo: {
-    fontSize: 12.5,
-    color: '#64748b',
+    fontSize: 12,
+    color: SmashTheme.colors.secondary,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -2186,14 +2634,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8fafc',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     padding: 12,
   },
   scoreInputLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#334155',
+    color: SmashTheme.colors.onSurface,
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -2205,15 +2655,15 @@ const styles = StyleSheet.create({
   stepButton: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    backgroundColor: '#e2e8f0',
+    borderRadius: 10,
+    backgroundColor: SmashTheme.colors.surfaceContainerHigh,
     justifyContent: 'center',
     alignItems: 'center',
   },
   counterValue: {
     fontSize: 22,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontWeight: '900',
+    color: SmashTheme.colors.primary,
     minWidth: 20,
     textAlign: 'center',
   },
@@ -2224,33 +2674,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   quickScorePill: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderWidth: 1,
-    borderColor: '#bfdbfe',
+    borderColor: SmashTheme.colors.cardBorder,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   quickScorePillText: {
-    color: '#2563eb',
+    color: SmashTheme.colors.secondary,
     fontSize: 12,
     fontWeight: '700',
   },
   detailLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#64748b',
+    color: SmashTheme.colors.onSurfaceVariant,
     marginBottom: 4,
   },
   detailInput: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderWidth: 1,
-    borderColor: '#cbd5e1',
+    borderColor: SmashTheme.colors.cardBorder,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 13,
-    color: '#0f172a',
+    color: SmashTheme.colors.onSurface,
   },
   modalButtonsRow: {
     flexDirection: 'row',
@@ -2261,24 +2711,24 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 11,
     borderRadius: 10,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     alignItems: 'center',
   },
   modalCancelButtonText: {
-    color: '#475569',
-    fontSize: 13.5,
+    color: SmashTheme.colors.onSurfaceVariant,
+    fontSize: 13,
     fontWeight: '700',
   },
   modalSaveButton: {
     flex: 1,
     paddingVertical: 11,
     borderRadius: 10,
-    backgroundColor: '#2563eb',
+    backgroundColor: SmashTheme.colors.primary,
     alignItems: 'center',
   },
   modalSaveButtonText: {
-    color: '#ffffff',
-    fontSize: 13.5,
-    fontWeight: '700',
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

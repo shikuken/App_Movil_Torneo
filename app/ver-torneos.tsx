@@ -5,7 +5,6 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  ImageBackground,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
@@ -17,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
+import { SmashTheme } from '../constants/theme';
 
 interface Torneo {
   id: string;
@@ -25,10 +25,12 @@ interface Torneo {
   lugarSede?: string | null;
   categoria?: string | null;
   modalidad: string;
+  tipoTorneo?: string;
   creadoEn?: any;
   usuarioId?: string;
   fechaTorneo?: string | null;
   horaTorneo?: string | null;
+  estado?: string;
 }
 
 export default function VerTorneosScreen() {
@@ -39,7 +41,6 @@ export default function VerTorneosScreen() {
   const [busqueda, setBusqueda] = useState('');
   const [filtroModalidad, setFiltroModalidad] = useState<'Todos' | 'Eliminación directa' | 'Todos contra todos' | 'Mis torneos'>('Todos');
 
-  // Escuchar todos los torneos en tiempo real desde Firestore
   useEffect(() => {
     const torneosRef = collection(db, 'torneos');
     const q = query(torneosRef);
@@ -57,14 +58,15 @@ export default function VerTorneosScreen() {
             lugarSede: data.lugarSede || null,
             categoria: data.categoria || null,
             modalidad: data.modalidad || 'Eliminación directa',
+            tipoTorneo: data.tipoTorneo || 'amistoso',
             creadoEn: data.creadoEn || null,
             usuarioId: data.usuarioId || '',
             fechaTorneo: data.fechaTorneo || null,
             horaTorneo: data.horaTorneo || null,
+            estado: data.estado || 'creado',
           });
         });
 
-        // Ordenar los torneos más recientes primero
         lista.sort((a, b) => {
           const timeA = a.creadoEn?.seconds || 0;
           const timeB = b.creadoEn?.seconds || 0;
@@ -83,7 +85,6 @@ export default function VerTorneosScreen() {
     return () => unsubscribe();
   }, []);
 
-  // Función para dar formato legible a la fecha de Firestore
   const formatearFecha = (timestamp: any): string => {
     if (!timestamp) return 'Fecha no registrada';
     try {
@@ -98,7 +99,6 @@ export default function VerTorneosScreen() {
     }
   };
 
-  // Filtrado de torneos en base al texto ingresado y la modalidad
   const currentUid = auth.currentUser?.uid;
   const torneosFiltrados = torneos.filter((torneo) => {
     const queryTexto = busqueda.toLowerCase().trim();
@@ -126,560 +126,570 @@ export default function VerTorneosScreen() {
     return coincideTexto && coincideModalidad;
   });
 
+  const handleSeleccionarTorneo = (torneo: Torneo) => {
+    const esPropietario = !!currentUid && torneo.usuarioId === currentUid;
+    router.push({
+      pathname: '/registrar-jugadores',
+      params: {
+        torneoId: torneo.id,
+        nombreTorneo: torneo.nombreTorneo,
+        modalidad: torneo.modalidad,
+        tipoTorneo: torneo.tipoTorneo || 'amistoso',
+        esPropietario: esPropietario ? 'true' : 'false',
+      },
+    });
+  };
+
+  const handleVerDesarrollo = (torneo: Torneo) => {
+    const esPropietario = !!currentUid && torneo.usuarioId === currentUid;
+    router.push({
+      pathname: '/desarrollo-torneo' as any,
+      params: {
+        torneoId: torneo.id,
+        nombreTorneo: torneo.nombreTorneo,
+        modalidad: torneo.modalidad,
+        tipoTorneo: torneo.tipoTorneo || 'amistoso',
+        esPropietario: esPropietario ? 'true' : 'false',
+      },
+    });
+  };
+
   return (
-    <ImageBackground
-      source={{
-        uri: 'https://images.unsplash.com/photo-1534158914592-062992fbe900?auto=format&fit=crop&w=1200&q=80',
-      }}
-      style={styles.backgroundImage}
-      resizeMode="cover">
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar barStyle="light-content" />
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.keyboardView}>
-            
-            {/* Encabezado fijo */}
-            <View style={styles.header}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => router.replace('/(tabs)')}
-                activeOpacity={0.7}>
-                <Ionicons name="arrow-back" size={22} color="#ffffff" />
-                <Text style={styles.backButtonText}>Menú</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Luces de ambiente */}
+      <View style={styles.glowTop} pointerEvents="none" />
+
+      {/* Header Fijo */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.replace('/(tabs)')}
+          activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={20} color={SmashTheme.colors.onSurface} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>Explorar Torneos</Text>
+          <Text style={styles.headerSubtitle}>{torneos.length} torneos registrados</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <TouchableOpacity
+            style={styles.rankingHeaderBtn}
+            onPress={() => router.push('/ranking' as any)}
+            activeOpacity={0.85}>
+            <Ionicons name="podium-outline" size={16} color={SmashTheme.colors.secondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.createBtn}
+            onPress={() => router.push('/crear-torneo')}
+            activeOpacity={0.85}>
+            <Ionicons name="add" size={16} color={SmashTheme.colors.onPrimary} />
+            <Text style={styles.createBtnText}>Crear</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}>
+
+        {/* Buscador y Filtros estilo Stitch */}
+        <View style={styles.searchAndFiltersContainer}>
+          {/* Barra de Búsqueda */}
+          <View style={styles.searchWrapper}>
+            <Ionicons name="search" size={18} color={SmashTheme.colors.onSurfaceVariant} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar por nombre, club o sede..."
+              placeholderTextColor={SmashTheme.colors.onSurfaceVariant + '80'}
+              value={busqueda}
+              onChangeText={setBusqueda}
+            />
+            {busqueda.length > 0 && (
+              <TouchableOpacity onPress={() => setBusqueda('')} style={styles.clearSearchBtn}>
+                <Ionicons name="close-circle" size={18} color={SmashTheme.colors.onSurfaceVariant} />
               </TouchableOpacity>
-              <Text style={styles.headerTitle}>Torneos Disponibles</Text>
-              <View style={{ width: 60 }} />
-            </View>
+            )}
+          </View>
 
-            {/* Barra de Búsqueda */}
-            <View style={styles.searchSection}>
-              <View style={styles.searchBar}>
-                <Ionicons name="search" size={20} color="#64748b" style={styles.searchIcon} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Buscar por nombre, sede, organizador o fecha..."
-                  placeholderTextColor="#94a3b8"
-                  value={busqueda}
-                  onChangeText={setBusqueda}
-                  autoCorrect={false}
-                />
-                {busqueda.length > 0 && (
-                  <TouchableOpacity onPress={() => setBusqueda('')} style={styles.clearButton}>
-                    <Ionicons name="close-circle" size={18} color="#94a3b8" />
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Filtros de Modalidad (Chips) */}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterChipsContainer}>
-                {/* Chip especial: Mis torneos */}
+          {/* Filtros Horizontales (Pills) */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterPillsContainer}>
+            {(['Todos', 'Eliminación directa', 'Todos contra todos', 'Mis torneos'] as const).map((filtro) => {
+              const isActive = filtroModalidad === filtro;
+              return (
                 <TouchableOpacity
-                  style={[
-                    styles.chip,
-                    styles.chipMisTorneos,
-                    filtroModalidad === 'Mis torneos' && styles.chipMisTorneosSelected,
-                  ]}
-                  onPress={() => setFiltroModalidad('Mis torneos')}
-                  activeOpacity={0.75}>
-                  <Ionicons
-                    name="person"
-                    size={13}
-                    color={filtroModalidad === 'Mis torneos' ? '#ffffff' : '#f59e0b'}
-                  />
-                  <Text
-                    style={[
-                      styles.chipText,
-                      { color: filtroModalidad === 'Mis torneos' ? '#ffffff' : '#f59e0b' },
-                      filtroModalidad === 'Mis torneos' && { fontWeight: '700' },
-                    ]}>
-                    Mis torneos
+                  key={filtro}
+                  style={[styles.filterPill, isActive && styles.filterPillActive]}
+                  onPress={() => setFiltroModalidad(filtro)}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.filterPillText, isActive && styles.filterPillTextActive]}>
+                    {filtro === 'Todos' ? `Todos (${torneos.length})` : filtro}
                   </Text>
                 </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
 
-                {/* Chips de modalidad */}
-                {(['Todos', 'Eliminación directa', 'Todos contra todos'] as const).map((modalidad) => (
-                  <TouchableOpacity
-                    key={modalidad}
-                    style={[
-                      styles.chip,
-                      filtroModalidad === modalidad && styles.chipSelected,
-                    ]}
-                    onPress={() => setFiltroModalidad(modalidad)}
-                    activeOpacity={0.75}>
-                    <Text
-                      style={[
-                        styles.chipText,
-                        filtroModalidad === modalidad && styles.chipTextSelected,
-                      ]}>
-                      {modalidad}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
+        {/* Feed de Torneos */}
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}>
+          {cargando ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={SmashTheme.colors.primary} />
+              <Text style={styles.loadingText}>Sincronizando torneos en vivo...</Text>
             </View>
+          ) : torneosFiltrados.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="trophy-outline" size={48} color={SmashTheme.colors.outline} />
+              <Text style={styles.emptyTitle}>No se encontraron torneos</Text>
+              <Text style={styles.emptySubtitle}>
+                {busqueda
+                  ? 'Intenta con otro término de búsqueda.'
+                  : 'Crea tu primer torneo deportivo y organízalo en tiempo real.'}
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyCreateBtn}
+                onPress={() => router.push('/crear-torneo')}
+                activeOpacity={0.85}>
+                <Ionicons name="add-circle" size={18} color={SmashTheme.colors.onPrimary} />
+                <Text style={styles.emptyCreateBtnText}>Crear Nuevo Torneo</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.tournamentsList}>
+              {torneosFiltrados.map((torneo) => {
+                const esPropietario = !!currentUid && torneo.usuarioId === currentUid;
+                const esEliminacion = torneo.modalidad === 'Eliminación directa';
 
-            {/* Lista de Torneos */}
-            <ScrollView
-              contentContainerStyle={styles.scrollList}
-              showsVerticalScrollIndicator={false}>
-              
-              <View style={styles.counterRow}>
-                <Text style={styles.counterText}>
-                  {cargando
-                    ? 'Cargando torneos...'
-                    : `${torneosFiltrados.length} ${
-                        torneosFiltrados.length === 1 ? 'torneo encontrado' : 'torneos encontrados'
-                      }`}
-                </Text>
-              </View>
-
-              {cargando ? (
-                <View style={styles.centerContainer}>
-                  <ActivityIndicator size="large" color="#2563eb" />
-                  <Text style={styles.centerText}>Consultando torneos en la nube...</Text>
-                </View>
-              ) : torneosFiltrados.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="trophy-outline" size={54} color="#94a3b8" />
-                  <Text style={styles.emptyTitle}>No se encontraron torneos</Text>
-                  <Text style={styles.emptySubtitle}>
-                    {busqueda
-                      ? 'No hay resultados que coincidan con tu búsqueda. Intenta con otros términos.'
-                      : filtroModalidad === 'Mis torneos'
-                      ? '¡Aún no has creado ningún torneo! Crea uno desde el menú principal.'
-                      : 'Aún no se ha creado ningún torneo. ¡Crea el primero desde el menú principal!'}
-                  </Text>
-                </View>
-              ) : (
-                torneosFiltrados.map((torneo) => (
+                return (
                   <View key={torneo.id} style={styles.tournamentCard}>
-                    {/* Encabezado de la tarjeta */}
-                    <View style={styles.cardHeader}>
-                      <View style={styles.cardTitleContainer}>
-                        <Text style={styles.tournamentName} numberOfLines={2}>
-                          {torneo.nombreTorneo}
-                        </Text>
-                        <Text style={styles.organizerText}>
-                          <Ionicons name="person" size={13} color="#2563eb" /> {torneo.organizador}
-                        </Text>
+                    {/* Header de la Tarjeta */}
+                    <View style={styles.cardHeaderRow}>
+                      <View style={styles.badgesRow}>
+                        <View style={styles.liveBadge}>
+                          <View style={styles.liveDot} />
+                          <Text style={styles.liveBadgeText}>ACTIVO</Text>
+                        </View>
+                        {torneo.tipoTorneo === 'clasificatorio' && (
+                          <View style={styles.clasificatorioBadge}>
+                            <Ionicons name="ribbon" size={10} color={SmashTheme.colors.primary} />
+                            <Text style={styles.clasificatorioBadgeText}>OFICIAL</Text>
+                          </View>
+                        )}
+                        <View style={styles.formatBadge}>
+                          <Text style={styles.formatBadgeText}>{torneo.modalidad}</Text>
+                        </View>
                       </View>
-                      <View
-                        style={[
-                          styles.modalityBadge,
-                          torneo.modalidad === 'Todos contra todos'
-                            ? styles.badgeRoundRobin
-                            : styles.badgeDirect,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.modalityBadgeText,
-                            torneo.modalidad === 'Todos contra todos'
-                              ? styles.badgeRoundRobinText
-                              : styles.badgeDirectText,
-                          ]}>
-                          {torneo.modalidad}
-                        </Text>
-                      </View>
+
+                      {esPropietario && (
+                        <View style={styles.ownerChip}>
+                          <Ionicons name="shield-checkmark" size={12} color={SmashTheme.colors.secondary} />
+                          <Text style={styles.ownerChipText}>TÚ</Text>
+                        </View>
+                      )}
                     </View>
 
-                    <View style={styles.divider} />
+                    {/* Título & Meta */}
+                    <Text style={styles.cardTournamentTitle} numberOfLines={2}>
+                      {torneo.nombreTorneo}
+                    </Text>
 
-                    {/* Detalles del Torneo */}
-                    <View style={styles.cardDetails}>
+                    <View style={styles.cardMetaRow}>
+                      <View style={styles.metaInfoItem}>
+                        <Ionicons name="person-outline" size={13} color={SmashTheme.colors.onSurfaceVariant} />
+                        <Text style={styles.metaInfoText}>Org: {torneo.organizador}</Text>
+                      </View>
                       {torneo.lugarSede ? (
-                        <View style={styles.detailRow}>
-                          <Ionicons name="location-outline" size={16} color="#64748b" />
-                          <Text style={styles.detailText}>
-                            <Text style={styles.detailBold}>Sede: </Text>
-                            {torneo.lugarSede}
-                          </Text>
+                        <View style={styles.metaInfoItem}>
+                          <Ionicons name="location-outline" size={13} color={SmashTheme.colors.secondary} />
+                          <Text style={styles.metaInfoText} numberOfLines={1}>{torneo.lugarSede}</Text>
                         </View>
                       ) : null}
-
-                      {torneo.categoria ? (
-                        <View style={styles.detailRow}>
-                          <Ionicons name="pricetag-outline" size={16} color="#64748b" />
-                          <Text style={styles.detailText}>
-                            <Text style={styles.detailBold}>Categoría: </Text>
-                            {torneo.categoria}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {torneo.fechaTorneo ? (
-                        <View style={styles.detailRow}>
-                          <Ionicons name="time-outline" size={16} color="#059669" />
-                          <Text style={styles.detailText}>
-                            <Text style={[styles.detailBold, { color: '#059669' }]}>Fecha evento: </Text>
-                            {torneo.fechaTorneo} {torneo.horaTorneo ? `a las ${torneo.horaTorneo}` : ''}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      <View style={styles.detailRow}>
-                        <Ionicons name="calendar-outline" size={16} color="#64748b" />
-                        <Text style={styles.detailText}>
-                          <Text style={styles.detailBold}>Creado: </Text>
-                          {formatearFecha(torneo.creadoEn)}
-                        </Text>
-                      </View>
                     </View>
 
-                    {/* Botón para ver desarrollo del torneo (Fixture / Cuadro de partidos) */}
-                    <TouchableOpacity
-                      style={styles.cardBracketButton}
-                      onPress={() => {
-                        const currentUid = auth.currentUser?.uid;
-                        const esPropietario = !!currentUid && currentUid === torneo.usuarioId;
-                        router.push({
-                          pathname: '/desarrollo-torneo' as any,
-                          params: {
-                            torneoId: torneo.id,
-                            nombreTorneo: torneo.nombreTorneo,
-                            modalidad: torneo.modalidad,
-                            esPropietario: esPropietario ? 'true' : 'false',
-                          },
-                        });
-                      }}
-                      activeOpacity={0.85}>
-                      <Ionicons name="trophy" size={16} color="#b45309" />
-                      <Text style={styles.cardBracketButtonText}>Desarrollo / Partidos</Text>
-                      <Ionicons name="chevron-forward" size={16} color="#b45309" />
-                    </TouchableOpacity>
+                    {torneo.fechaTorneo ? (
+                      <View style={styles.dateRow}>
+                        <Ionicons name="calendar-outline" size={13} color={SmashTheme.colors.primary} />
+                        <Text style={styles.dateText}>
+                          {torneo.fechaTorneo} {torneo.horaTorneo ? `• ${torneo.horaTorneo}` : ''}
+                        </Text>
+                      </View>
+                    ) : null}
 
-                    {/* Botón: Gestionar (solo propietario) o Ver (solo lectura) */}
-                    {(() => {
-                      const currentUid = auth.currentUser?.uid;
-                      const esPropietario = !!currentUid && currentUid === torneo.usuarioId;
-                      return esPropietario ? (
-                        <TouchableOpacity
-                          style={styles.cardButton}
-                          onPress={() => {
-                            router.push({
-                              pathname: '/registrar-jugadores' as any,
-                              params: {
-                                torneoId: torneo.id,
-                                nombreTorneo: torneo.nombreTorneo,
-                                modalidad: torneo.modalidad,
-                                esPropietario: 'true',
-                              },
-                            });
-                          }}
-                          activeOpacity={0.85}>
-                          <Ionicons name="settings" size={18} color="#ffffff" />
-                          <Text style={styles.cardButtonText}>Gestionar Torneo</Text>
-                          <Ionicons name="chevron-forward" size={18} color="#ffffff" />
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity
-                          style={styles.cardButtonReadOnly}
-                          onPress={() => {
-                            router.push({
-                              pathname: '/registrar-jugadores' as any,
-                              params: {
-                                torneoId: torneo.id,
-                                nombreTorneo: torneo.nombreTorneo,
-                                modalidad: torneo.modalidad,
-                                esPropietario: 'false',
-                              },
-                            });
-                          }}
-                          activeOpacity={0.85}>
-                          <Ionicons name="people" size={18} color="#2563eb" />
-                          <Text style={styles.cardButtonReadOnlyText}>Ver Participantes</Text>
-                          <Ionicons name="chevron-forward" size={18} color="#2563eb" />
-                        </TouchableOpacity>
-                      );
-                    })()}
+                    {/* Botones de Acción */}
+                    <View style={styles.cardActionsRow}>
+                      <TouchableOpacity
+                        style={styles.cardActionPrimary}
+                        onPress={() => handleVerDesarrollo(torneo)}
+                        activeOpacity={0.85}>
+                        <Ionicons name="play" size={14} color={SmashTheme.colors.onPrimary} />
+                        <Text style={styles.cardActionPrimaryText}>Ver Fixture / Llave</Text>
+                      </TouchableOpacity>
 
+                      <TouchableOpacity
+                        style={styles.cardActionSecondary}
+                        onPress={() => handleSeleccionarTorneo(torneo)}
+                        activeOpacity={0.8}>
+                        <Ionicons name="people-outline" size={15} color={SmashTheme.colors.onSurface} />
+                        <Text style={styles.cardActionSecondaryText}>Inscritos</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                ))
-              )}
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </View>
-    </ImageBackground>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.82)',
-  },
   safeArea: {
     flex: 1,
+    backgroundColor: SmashTheme.colors.surface,
   },
-  keyboardView: {
-    flex: 1,
+  glowTop: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: SmashTheme.colors.primary,
+    opacity: 0.05,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: SmashTheme.colors.cardBorder,
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
+    gap: 12,
   },
   backButton: {
-    flexDirection: 'row',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 20,
+    justifyContent: 'center',
   },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
+  headerTitleContainer: {
+    flex: 1,
   },
   headerTitle: {
-    color: '#ffffff',
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '800',
-    textAlign: 'center',
+    color: SmashTheme.colors.onSurface,
   },
-  searchSection: {
-    paddingHorizontal: 18,
-    marginBottom: 10,
+  headerSubtitle: {
+    fontSize: 12,
+    color: SmashTheme.colors.onSurfaceVariant,
+    marginTop: 1,
   },
-  searchBar: {
+  rankingHeaderBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    gap: 4,
+    backgroundColor: SmashTheme.colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  createBtnText: {
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  clasificatorioBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(195, 244, 0, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.borderVolt,
+  },
+  clasificatorioBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: SmashTheme.colors.primary,
+    letterSpacing: 0.3,
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  searchAndFiltersContainer: {
+    backgroundColor: SmashTheme.colors.surfaceContainerLowest,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: SmashTheme.colors.cardBorder,
+  },
+  searchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: SmashTheme.colors.surfaceContainer,
     borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 48,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    paddingHorizontal: 12,
+    height: 44,
   },
   searchIcon: {
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14.5,
-    color: '#0f172a',
+    color: SmashTheme.colors.onSurface,
+    fontSize: 13,
   },
-  clearButton: {
+  clearSearchBtn: {
     padding: 4,
   },
-  filterChipsContainer: {
+  filterPillsContainer: {
     flexDirection: 'row',
     gap: 8,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
   },
-  chip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  filterPill: {
     paddingHorizontal: 14,
     paddingVertical: 7,
-    borderRadius: 20,
+    borderRadius: 9999,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
   },
-  chipSelected: {
-    backgroundColor: '#2563eb',
+  filterPillActive: {
+    backgroundColor: SmashTheme.colors.primary,
+    borderColor: SmashTheme.colors.primary,
   },
-  chipText: {
-    color: '#e2e8f0',
-    fontSize: 13,
+  filterPillText: {
+    fontSize: 12,
     fontWeight: '600',
+    color: SmashTheme.colors.onSurfaceVariant,
   },
-  chipTextSelected: {
-    color: '#ffffff',
-    fontWeight: '700',
+  filterPillTextActive: {
+    color: SmashTheme.colors.onPrimary,
+    fontWeight: '800',
   },
-  chipMisTorneos: {
-    backgroundColor: 'rgba(245, 158, 11, 0.18)',
-    borderWidth: 1.5,
-    borderColor: '#f59e0b',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  chipMisTorneosSelected: {
-    backgroundColor: '#f59e0b',
-    borderColor: '#f59e0b',
-  },
-  scrollList: {
-    paddingHorizontal: 18,
+  scrollContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 40,
   },
-  counterRow: {
-    marginBottom: 12,
-  },
-  counterText: {
-    color: '#94a3b8',
-    fontSize: 13.5,
-    fontWeight: '600',
-  },
-  centerContainer: {
-    paddingVertical: 40,
+  loadingContainer: {
+    padding: 40,
     alignItems: 'center',
     gap: 12,
   },
-  centerText: {
-    color: '#cbd5e1',
-    fontSize: 14.5,
+  loadingText: {
+    fontSize: 13,
+    color: SmashTheme.colors.onSurfaceVariant,
   },
   emptyContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    borderRadius: 20,
-    padding: 30,
+    padding: 36,
     alignItems: 'center',
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
     marginTop: 20,
-    gap: 8,
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
-    color: '#1e293b',
-    marginTop: 6,
+    color: SmashTheme.colors.onSurface,
+    marginTop: 12,
   },
   emptySubtitle: {
-    fontSize: 13.5,
-    color: '#64748b',
+    fontSize: 13,
+    color: SmashTheme.colors.onSurfaceVariant,
     textAlign: 'center',
-    lineHeight: 20,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  emptyCreateBtn: {
+    marginTop: 18,
+    backgroundColor: SmashTheme.colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  emptyCreateBtnText: {
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  tournamentsList: {
+    gap: 14,
   },
   tournamentCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.97)',
+    backgroundColor: SmashTheme.colors.surfaceContainerLow,
     borderRadius: 20,
-    padding: 18,
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    padding: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  cardHeader: {
+  cardHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  cardTitleContainer: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  tournamentName: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0f172a',
-    letterSpacing: -0.3,
-  },
-  organizerText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#2563eb',
-    marginTop: 3,
-  },
-  modalityBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-  },
-  badgeDirect: {
-    backgroundColor: '#eff6ff',
-  },
-  badgeDirectText: {
-    color: '#1d4ed8',
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  badgeRoundRobin: {
-    backgroundColor: '#f0fdf4',
-  },
-  badgeRoundRobinText: {
-    color: '#16a34a',
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  modalityBadgeText: {},
-  divider: {
-    height: 1,
-    backgroundColor: '#e2e8f0',
-    marginVertical: 12,
-  },
-  cardDetails: {
-    gap: 6,
-    marginBottom: 14,
-  },
-  detailRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  detailText: {
-    fontSize: 13.5,
-    color: '#475569',
-  },
-  detailBold: {
-    fontWeight: '700',
-    color: '#334155',
-  },
-  cardButton: {
-    backgroundColor: '#2563eb',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  cardButtonText: {
-    color: '#ffffff',
-    fontSize: 14.5,
-    fontWeight: '700',
-  },
-  cardButtonReadOnly: {
-    borderWidth: 1.5,
-    borderColor: '#2563eb',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(37, 99, 235, 0.08)',
-  },
-  cardButtonReadOnlyText: {
-    color: '#2563eb',
-    fontSize: 14.5,
-    fontWeight: '700',
-  },
-  cardBracketButton: {
-    backgroundColor: '#fffbeb',
-    borderWidth: 1.5,
-    borderColor: '#f59e0b',
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
     marginBottom: 8,
   },
-  cardBracketButtonText: {
-    color: '#b45309',
-    fontSize: 14,
+  badgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(195, 244, 0, 0.12)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(195, 244, 0, 0.25)',
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: SmashTheme.colors.primary,
+  },
+  liveBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: SmashTheme.colors.primary,
+    letterSpacing: 0.5,
+  },
+  formatBadge: {
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  formatBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: SmashTheme.colors.onSurfaceVariant,
+  },
+  ownerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(76, 215, 246, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  ownerChipText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: SmashTheme.colors.secondary,
+  },
+  cardTournamentTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: SmashTheme.colors.onSurface,
+    marginBottom: 8,
+  },
+  cardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 6,
+  },
+  metaInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaInfoText: {
+    fontSize: 12,
+    color: SmashTheme.colors.onSurfaceVariant,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 14,
+  },
+  dateText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: SmashTheme.colors.primary,
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cardActionPrimary: {
+    flex: 1.5,
+    backgroundColor: SmashTheme.colors.primary,
+    borderRadius: 12,
+    height: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  cardActionPrimaryText: {
+    color: SmashTheme.colors.onPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  cardActionSecondary: {
+    flex: 1,
+    backgroundColor: SmashTheme.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: SmashTheme.colors.cardBorder,
+    borderRadius: 12,
+    height: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  cardActionSecondaryText: {
+    color: SmashTheme.colors.onSurface,
+    fontSize: 12,
     fontWeight: '700',
   },
 });
