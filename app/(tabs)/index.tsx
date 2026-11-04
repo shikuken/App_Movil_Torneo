@@ -76,8 +76,8 @@ export default function HomeScreen() {
       router.push('/ver-torneos' as any);
     } else if (optionName === 'Ver ranking de jugadores') {
       router.push('/ranking' as any);
-    } else if (optionName === 'Noticias') {
-      Alert.alert('Noticias Deportivas', 'Nueva edición del torneo Apertura Smash confirmada para el próximo mes.');
+    } else if (optionName === 'Tienda') {
+      router.push('/tienda');
     } else {
       Alert.alert(optionName, `Has seleccionado "${optionName}".`);
     }
@@ -295,16 +295,16 @@ export default function HomeScreen() {
               <Text style={styles.quickCardDesc}>Posiciones oficiales y puntos acumulados</Text>
             </TouchableOpacity>
 
-            {/* Opción 4: Noticias */}
+            {/* Opción 4: Tienda */}
             <TouchableOpacity
               style={styles.quickCard}
-              onPress={() => handleMenuPress('Noticias')}
+              onPress={() => handleMenuPress('Tienda')}
               activeOpacity={0.8}>
               <View style={[styles.quickIconContainer, { backgroundColor: 'rgba(234, 88, 12, 0.12)' }]}>
-                <Ionicons name="newspaper" size={26} color="#fb923c" />
+                <Ionicons name="basket" size={26} color="#fb923c" />
               </View>
-              <Text style={styles.quickCardTitle}>Noticias</Text>
-              <Text style={styles.quickCardDesc}>Reglamento, avisos y novedades</Text>
+              <Text style={styles.quickCardTitle}>Tienda</Text>
+              <Text style={styles.quickCardDesc}>Equipamiento para tenis de mesa</Text>
             </TouchableOpacity>
           </View>
         </View>
