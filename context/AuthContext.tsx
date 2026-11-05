@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, ReactNod
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { auth, db } from '../firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import {
   isSessionExpired,
   clearSessionTimestamps,
@@ -18,6 +18,12 @@ export interface PerfilUsuario {
   apellido?: string;
   telefono?: string;
   email?: string | null;
+  fotoUrl?: string | null;
+  puntosRanking?: number;
+  torneosJugados?: number;
+  primerosPuestos?: number;
+  segundosPuestos?: number;
+  tercerosPuestos?: number;
 }
 
 interface AuthContextValue {
@@ -25,6 +31,12 @@ interface AuthContextValue {
   perfil: PerfilUsuario | null;
   cargandoAuth: boolean;
   logout: () => Promise<void>;
+  actualizarPerfil: (datos: {
+    nombre?: string;
+    apellido?: string;
+    telefono?: string;
+    fotoUrl?: string | null;
+  }) => Promise<void>;
   estaAutenticado: boolean;
 }
 
@@ -126,6 +138,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut(auth);
   };
 
+  const actualizarPerfil = async (datos: {
+    nombre?: string;
+    apellido?: string;
+    telefono?: string;
+    fotoUrl?: string | null;
+  }) => {
+    if (!user) return;
+    const userDocRef = doc(db, 'usuarios', user.uid);
+    await setDoc(userDocRef, datos, { merge: true });
+    setPerfil((prev) => (prev ? { ...prev, ...datos } : { uid: user.uid, email: user.email, ...datos }));
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -133,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         perfil,
         cargandoAuth,
         logout,
+        actualizarPerfil,
         estaAutenticado: !!user,
       }}
     >

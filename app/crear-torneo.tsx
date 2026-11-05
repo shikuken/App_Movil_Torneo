@@ -19,6 +19,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import * as Notifications from 'expo-notifications';
 import { SmashTheme } from '../constants/theme';
+import { useToast } from '../context/ToastContext';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -32,6 +33,7 @@ Notifications.setNotificationHandler({
 export default function CrearTorneoScreen() {
   const router = useRouter();
   const currentUser = auth.currentUser;
+  const { showToast, showError, showWarning, showSuccess } = useToast();
 
   // Estados para los campos de entrada
   const [nombreTorneo, setNombreTorneo] = useState('');
@@ -47,10 +49,10 @@ export default function CrearTorneoScreen() {
   const [cargando, setCargando] = useState(false);
 
   const mostrarMensaje = (titulo: string, mensaje: string) => {
-    if (Platform.OS === 'web') {
-      window.alert(`${titulo}\n${mensaje}`);
+    if (titulo.toLowerCase().includes('error')) {
+      showError(mensaje, titulo);
     } else {
-      Alert.alert(titulo, mensaje);
+      showWarning(mensaje, titulo);
     }
   };
 
@@ -63,12 +65,14 @@ export default function CrearTorneoScreen() {
           await Notifications.deleteNotificationChannelAsync('torneos');
         } catch (_) {}
 
-        await Notifications.setNotificationChannelAsync('torneos_canal', {
-          name: 'Notificaciones de torneos',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: SmashTheme.colors.primary,
-        });
+        try {
+          await Notifications.setNotificationChannelAsync('torneos_canal', {
+            name: 'Notificaciones de torneos',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: SmashTheme.colors.primary,
+          });
+        } catch (_) {}
       }
 
       let { status, canAskAgain } = await Notifications.getPermissionsAsync();
@@ -129,6 +133,7 @@ export default function CrearTorneoScreen() {
       });
 
       await notificarTorneoCreado(nombreTorneo.trim());
+      showSuccess(`Torneo "${nombreTorneo.trim()}" creado exitosamente.`);
 
       router.push({
         pathname: '/registrar-jugadores',

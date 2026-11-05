@@ -19,9 +19,11 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { SmashTheme } from '../constants/theme';
+import { useToast } from '../context/ToastContext';
 
 export default function RegistroScreen() {
   const router = useRouter();
+  const { showWarning, showError, showSuccess } = useToast();
 
   const [nombre, setNombre] = useState('');
   const [apellido, setApellido] = useState('');
@@ -45,26 +47,26 @@ export default function RegistroScreen() {
     const passTrim = password.trim();
 
     if (!nombreTrim || !apellidoTrim || !telefonoTrim || !emailTrim || !passTrim) {
-      Alert.alert(
-        'Campos incompletos',
-        'Por favor completa todos los campos requeridos: nombre, apellido, teléfono, correo electrónico y contraseña.'
+      showWarning(
+        'Por favor completa todos los campos requeridos.',
+        'Campos incompletos'
       );
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(emailTrim)) {
-      Alert.alert('Correo inválido', 'Por favor ingresa un correo electrónico válido (ej: usuario@ejemplo.com).');
+      showWarning('Por favor ingresa un correo electrónico válido.', 'Correo inválido');
       return;
     }
 
     if (telefonoTrim.replace(/[^0-9]/g, '').length < 7) {
-      Alert.alert('Teléfono inválido', 'Por favor ingresa un número de teléfono válido.');
+      showWarning('Por favor ingresa un número de teléfono válido.', 'Teléfono inválido');
       return;
     }
 
     if (passTrim.length < 6) {
-      Alert.alert('Contraseña débil', 'La contraseña debe tener al menos 6 caracteres.');
+      showWarning('La contraseña debe tener al menos 6 caracteres.', 'Contraseña débil');
       return;
     }
 
@@ -88,18 +90,11 @@ export default function RegistroScreen() {
         creadoEn: new Date().toISOString(),
       });
 
-      Alert.alert(
-        '¡Registro Exitoso!',
-        `¡Bienvenido a Smash Match, ${nombreTrim} ${apellidoTrim}! Tu cuenta ha sido creada correctamente.`,
-        [
-          {
-            text: 'Entrar a la aplicación',
-            onPress: () => {
-              router.replace('/(tabs)');
-            },
-          },
-        ]
+      showSuccess(
+        `¡Bienvenido a Smash Match, ${nombreTrim}! Tu cuenta ha sido creada.`,
+        '¡Registro Exitoso!'
       );
+      router.replace('/(tabs)');
     } catch (err: any) {
       console.error('Error al registrar usuario:', err);
       let mensajeError = 'No se pudo completar el registro. Intenta nuevamente.';
@@ -115,7 +110,7 @@ export default function RegistroScreen() {
       }
 
       setError(mensajeError);
-      Alert.alert('Error de registro', mensajeError);
+      showError(mensajeError, 'Error de registro');
     } finally {
       setCargando(false);
     }

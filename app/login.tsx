@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,9 +20,11 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 import { SmashTheme } from '../constants/theme';
 import { storeLoginTimestamp } from '../utils/session';
+import { useToast } from '../context/ToastContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { showWarning, showError, showInfo } = useToast();
 
   const navigation = {
     navigate: (screen: string) => {
@@ -45,18 +48,18 @@ export default function LoginScreen() {
     const passTrimmed = password.trim();
 
     if (!emailTrimmed || !passTrimmed) {
-      Alert.alert('Campos incompletos', 'Por favor ingresa tu correo electrónico y contraseña.');
+      showWarning('Por favor ingresa tu correo electrónico y contraseña.', 'Campos incompletos');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(emailTrimmed)) {
-      Alert.alert('Correo inválido', 'Por favor ingresa una dirección de correo electrónico válida.');
+      showWarning('Por favor ingresa una dirección de correo electrónico válida.', 'Correo inválido');
       return;
     }
 
     if (passTrimmed.length < 6) {
-      Alert.alert('Contraseña corta', 'La contraseña debe tener al menos 6 caracteres.');
+      showWarning('La contraseña debe tener al menos 6 caracteres.', 'Contraseña corta');
       return;
     }
 
@@ -69,7 +72,7 @@ export default function LoginScreen() {
       router.replace('/(tabs)');
     } catch (err: any) {
       setError('Correo o contraseña incorrectos');
-      Alert.alert('Error de inicio de sesión', 'Correo o contraseña incorrectos');
+      showError('Correo o contraseña incorrectos', 'Error de inicio de sesión');
     } finally {
       setCargando(false);
     }
@@ -95,7 +98,11 @@ export default function LoginScreen() {
           {/* Logo y Encabezado de Marca */}
           <View style={styles.brandContainer}>
             <View style={styles.logoBadge}>
-              <Ionicons name="trophy" size={36} color={SmashTheme.colors.primary} />
+              <Image
+                source={require('../assets/images/logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
             <Text style={styles.brandTitle}>
               SMASH <Text style={styles.brandTitleAccent}>MATCH</Text>
@@ -183,7 +190,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={() => Alert.alert('Recuperar Clave', 'Ingresa tu correo para restablecer tu contraseña.')}
+                onPress={() => showInfo('Ingresa tu correo para restablecer tu contraseña.', 'Recuperar Clave')}
                 activeOpacity={0.7}>
                 <Text style={styles.forgotText}>¿Olvidaste tu clave?</Text>
               </TouchableOpacity>
@@ -269,11 +276,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   logoBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
+    width: 84,
+    height: 84,
+    borderRadius: 24,
     backgroundColor: SmashTheme.colors.surfaceContainerHigh,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: SmashTheme.colors.borderVolt,
     justifyContent: 'center',
     alignItems: 'center',
@@ -283,6 +290,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 8,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 78,
+    height: 78,
+    borderRadius: 20,
   },
   brandTitle: {
     fontSize: 26,

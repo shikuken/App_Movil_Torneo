@@ -13,20 +13,7 @@ function StitchBottomBar({ state, descriptors, navigation }: any) {
   const bottomInset = Math.max(insets.bottom, 10);
 
   const handleProfile = () => {
-    if (Platform.OS === 'web') {
-      const conf = window.confirm('¿Deseas cerrar tu sesión actual en Smash Match?');
-      if (conf) {
-        logout().then(() => router.replace('/login'));
-      }
-      return;
-    }
-    Alert.alert('Perfil de Usuario', '¿Deseas cerrar tu sesión actual?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Cerrar sesión', style: 'destructive', onPress: async () => {
-        await logout();
-        router.replace('/login');
-      }},
-    ]);
+    router.push('/perfil' as any);
   };
 
   return (

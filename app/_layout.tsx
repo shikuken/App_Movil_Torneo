@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import { ToastProvider } from '../context/ToastContext';
 import { SmashTheme } from '../constants/theme';
 
 export const unstable_settings = {
@@ -50,6 +51,7 @@ function RootLayoutNav() {
       <Stack.Screen name="desarrollo-torneo" options={{ headerShown: false }} />
       <Stack.Screen name="ranking" options={{ headerShown: false }} />
       <Stack.Screen name="tienda" options={{ headerShown: false }} />
+      <Stack.Screen name="perfil" options={{ headerShown: false }} />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );
@@ -58,8 +60,10 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <RootLayoutNav />
       <StatusBar style="light" />
+      </ToastProvider>
     </AuthProvider>
   );
 }

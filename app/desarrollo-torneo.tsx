@@ -31,6 +31,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import { SmashTheme } from '../constants/theme';
+import { useToast } from '../context/ToastContext';
 
 interface JugadorInfo {
   id: string;
@@ -81,6 +82,7 @@ interface PosicionJugador {
 
 export default function DesarrolloTorneoScreen() {
   const router = useRouter();
+  const { showSuccess, showError, showWarning, showInfo } = useToast();
   const params = useLocalSearchParams<{
     torneoId?: string;
     nombreTorneo?: string;
@@ -667,9 +669,7 @@ export default function DesarrolloTorneoScreen() {
   // ─────────────────────────────────────────────────────────────
   const handleGenerarFixture = async () => {
     if (jugadores.length < 2) {
-      const msg = 'Se necesitan al menos 2 jugadores registrados para generar el fixture.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Jugadores insuficientes', msg);
+      showWarning('Se necesitan al menos 2 jugadores registrados para generar el fixture.', 'Jugadores insuficientes');
       return;
     }
 
@@ -716,13 +716,9 @@ export default function DesarrolloTorneoScreen() {
         await generarFixtureEliminacion(jugadores, usarByes);
       }
 
-      const msg = '¡Fixture generado con éxito!';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('¡Excelente!', msg);
+      showSuccess('¡Fixture generado con éxito!');
     } catch (e: any) {
-      const err = e.message || 'Error al generar los partidos.';
-      if (Platform.OS === 'web') window.alert(err);
-      else Alert.alert('Error', err);
+      showError(e.message || 'Error al generar los partidos.', 'Error');
     } finally {
       setGenerando(false);
     }
@@ -742,9 +738,7 @@ export default function DesarrolloTorneoScreen() {
     if (!partidoActivo) return;
 
     if (marcador1 === marcador2) {
-      const msg = 'En tenis de mesa no hay empates. Un jugador debe ganar la serie de sets.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Empate no permitido', msg);
+      showWarning('En tenis de mesa no hay empates. Un jugador debe ganar la serie de sets.', 'Empate no permitido');
       return;
     }
 
@@ -752,9 +746,7 @@ export default function DesarrolloTorneoScreen() {
     const perdedor = marcador1 > marcador2 ? partidoActivo.jugador2 : partidoActivo.jugador1;
 
     if (!ganador) {
-      const msg = 'No se ha determinado el jugador ganador.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
+      showError('No se ha determinado el jugador ganador.', 'Error');
       return;
     }
 
@@ -827,9 +819,7 @@ export default function DesarrolloTorneoScreen() {
 
       setModalVisible(false);
     } catch (e: any) {
-      const err = e.message || 'Error al guardar el resultado.';
-      if (Platform.OS === 'web') window.alert(err);
-      else Alert.alert('Error', err);
+      showError(e.message || 'Error al guardar el resultado.', 'Error');
     } finally {
       setGuardandoResultado(false);
     }
@@ -1069,7 +1059,7 @@ export default function DesarrolloTorneoScreen() {
   // Asignar puntos de ranking a los 3 primeros puestos
   const handleAsignarPuntosRanking = async () => {
     if (!podioActual.primero) {
-      Alert.alert('Torneo no concluido', 'Aún no se ha determinado el ganador del torneo.');
+      showWarning('Aún no se ha determinado el ganador del torneo.', 'Torneo no concluido');
       return;
     }
 
@@ -1112,7 +1102,7 @@ export default function DesarrolloTorneoScreen() {
       );
     } catch (err: any) {
       console.error('Error al asignar puntos:', err);
-      Alert.alert('Error', err.message || 'No se pudieron asignar los puntos de ranking.');
+      showError(err.message || 'No se pudieron asignar los puntos de ranking.', 'Error');
     } finally {
       setGenerando(false);
     }

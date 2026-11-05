@@ -30,6 +30,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import { SmashTheme } from '../constants/theme';
+import { useToast } from '../context/ToastContext';
 
 interface Jugador {
   id: string;
@@ -51,6 +52,7 @@ interface UsuarioRegistrado {
 
 export default function RegistrarJugadoresScreen() {
   const router = useRouter();
+  const { showSuccess, showError, showWarning, showInfo } = useToast();
   const params = useLocalSearchParams<{
     torneoId?: string;
     nombreTorneo?: string;
@@ -247,12 +249,36 @@ export default function RegistrarJugadoresScreen() {
         creadoEn: serverTimestamp(),
       });
 
+      // Crear notificación para el jugador inscrito (modo clasificatorio)
+      try {
+        await addDoc(collection(db, 'notificaciones'), {
+          usuarioId: usuario.id,
+          email: (usuario.email || '').toLowerCase().trim(),
+          tipo: 'registro_torneo',
+          titulo: 'Inscripción a Torneo',
+          mensaje: `Lo han registrado al torneo "${torneoData.nombreTorneo || 'Torneo Smash'}"`,
+          torneoId: torneoId,
+          nombreTorneo: torneoData.nombreTorneo || 'Torneo Smash',
+          organizador: torneoData.organizador || '',
+          lugarSede: torneoData.lugarSede || 'Pistas Centrales',
+          categoria: torneoData.categoria || 'Intermedia',
+          modalidad: torneoData.modalidad || 'Eliminación directa',
+          tipoTorneo: 'clasificatorio',
+          fechaTorneo: torneoData.fechaTorneo || '',
+          horaTorneo: torneoData.horaTorneo || '',
+          estadoTorneo: torneoData.estado || 'creado',
+          leida: false,
+          creadoEn: Date.now(),
+        });
+      } catch (notifErr) {
+        console.warn('No se pudo enviar la notificación al jugador:', notifErr);
+      }
+
       setBusqueda('');
       setClub('');
+      showSuccess('Jugador inscrito correctamente.');
     } catch (err: any) {
-      const errorMsg = err.message || 'No se pudo inscribir al usuario.';
-      if (Platform.OS === 'web') window.alert(`Error: ${errorMsg}`);
-      else Alert.alert('Error', errorMsg);
+      showError(err.message || 'No se pudo inscribir al usuario.', 'Error');
     } finally {
       setGuardando(false);
     }
@@ -264,16 +290,12 @@ export default function RegistrarJugadoresScreen() {
     const telefonoTrim = telefono.trim();
 
     if (!nombreTrim) {
-      const msg = 'Por favor ingresa el nombre del jugador o pareja.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Nombre requerido', msg);
+      showWarning('Por favor ingresa el nombre del jugador o pareja.', 'Nombre requerido');
       return;
     }
 
     if (!torneoId) {
-      const msg = 'No se encontró el ID del torneo para registrar participantes.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
+      showError('No se encontró el ID del torneo para registrar participantes.', 'Error');
       return;
     }
 
@@ -290,10 +312,9 @@ export default function RegistrarJugadoresScreen() {
       setNombre('');
       setClub('');
       setTelefono('');
+      showSuccess(`"${nombreTrim}" agregado al torneo.`);
     } catch (err: any) {
-      const errorMsg = err.message || 'No se pudo guardar el jugador.';
-      if (Platform.OS === 'web') window.alert(`Error: ${errorMsg}`);
-      else Alert.alert('Error al registrar jugador', errorMsg);
+      showError(err.message || 'No se pudo guardar el jugador.', 'Error al registrar jugador');
     } finally {
       setGuardando(false);
     }
@@ -301,9 +322,7 @@ export default function RegistrarJugadoresScreen() {
 
   const handleEliminarJugador = (jugadorId: string, nombreJugador: string) => {
     if (torneoIniciado) {
-      const msg = 'El torneo ya ha iniciado. No se pueden eliminar participantes.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Torneo iniciado', msg);
+      showWarning('El torneo ya ha iniciado. No se pueden eliminar participantes.', 'Torneo iniciado');
       return;
     }
 
@@ -311,10 +330,9 @@ export default function RegistrarJugadoresScreen() {
       try {
         const jugadorRef = doc(db, 'torneos', torneoId, 'jugadores', jugadorId);
         await deleteDoc(jugadorRef);
+        showSuccess(`"${nombreJugador}" fue retirado.`);
       } catch (err: any) {
-        const errorMsg = err.message || 'No se pudo eliminar el jugador.';
-        if (Platform.OS === 'web') window.alert(`Error: ${errorMsg}`);
-        else Alert.alert('Error', errorMsg);
+        showError(err.message || 'No se pudo eliminar el jugador.', 'Error');
       }
     };
 
@@ -337,12 +355,12 @@ export default function RegistrarJugadoresScreen() {
   // Sorteo aleatorio de cabezas de serie
   const handleSortearParticipantes = () => {
     if (jugadores.length < 2) {
-      Alert.alert('Sorteo', 'Debes tener al menos 2 jugadores registrados para sortear.');
+      showWarning('Debes tener al menos 2 jugadores registrados para sortear.', 'Sorteo');
       return;
     }
     const jugadoresShuffled = [...jugadores].sort(() => Math.random() - 0.5);
     setJugadores(jugadoresShuffled);
-    Alert.alert('¡Sorteo Realizado!', 'El orden de las cabezas de serie ha sido barajado aleatoriamente.');
+    showSuccess('El orden de las cabezas de serie ha sido barajado aleatoriamente.', '¡Sorteo Realizado!');
   };
 
   const handleIrDesarrolloTorneo = () => {
@@ -372,7 +390,7 @@ export default function RegistrarJugadoresScreen() {
 
   const handleGuardarEdicionTorneo = async () => {
     if (!editNombre.trim() || !editOrganizador.trim()) {
-      Alert.alert('Campos obligatorios', 'El nombre y organizador no pueden estar vacíos.');
+      showWarning('El nombre y organizador no pueden estar vacíos.', 'Campos obligatorios');
       return;
     }
 
@@ -390,9 +408,9 @@ export default function RegistrarJugadoresScreen() {
       });
 
       setModalEditarVisible(false);
-      Alert.alert('¡Actualizado!', 'Información del torneo actualizada.');
+      showSuccess('Información del torneo actualizada.', '¡Actualizado!');
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo actualizar.');
+      showError(err.message || 'No se pudo actualizar.', 'Error');
     } finally {
       setGuardandoEdicion(false);
     }
@@ -412,11 +430,10 @@ export default function RegistrarJugadoresScreen() {
 
         await deleteDoc(doc(db, 'torneos', torneoId));
 
-        Alert.alert('Torneo Eliminado', `El torneo "${torneoData.nombreTorneo}" fue eliminado.`, [
-          { text: 'Aceptar', onPress: () => router.replace('/ver-torneos' as any) },
-        ]);
+        showSuccess(`El torneo "${torneoData.nombreTorneo}" fue eliminado.`, 'Torneo Eliminado');
+        router.replace('/ver-torneos' as any);
       } catch (err: any) {
-        Alert.alert('Error', err.message || 'No se pudo eliminar el torneo.');
+        showError(err.message || 'No se pudo eliminar el torneo.', 'Error');
         setEliminandoTorneo(false);
       }
     };

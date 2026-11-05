@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Alert,
   Linking,
   ScrollView,
   StatusBar,
@@ -8,160 +7,155 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SmashTheme } from '../constants/theme';
-
-const WHATSAPP_NUMBER = '573100293724';
-
-const products = [
-  {
-    name: 'Raqueta Pro Carbon',
-    category: 'RAQUETAS',
-    description: 'Madera ligera para un juego rápido y preciso.',
-    price: '$189.900',
-    icon: 'tennisball-outline' as const,
-    color: SmashTheme.colors.primary,
-    badge: 'MÁS VENDIDO',
-  },
-  {
-    name: 'Pelotas 3 estrellas',
-    category: 'PELOTAS',
-    description: 'Pack de 6 pelotas de 40 mm para competición.',
-    price: '$29.900',
-    icon: 'radio-button-on-outline' as const,
-    color: SmashTheme.colors.secondary,
-  },
-  {
-    name: 'Goma Spin Attack',
-    category: 'ACCESORIOS',
-    description: 'Goma de alto agarre para mejorar el efecto.',
-    price: '$79.900',
-    icon: 'disc-outline' as const,
-    color: '#c084fc',
-  },
-  {
-    name: 'Red de repuesto',
-    category: 'ACCESORIOS',
-    description: 'Red ajustable, compatible con mesas estándar.',
-    price: '$49.900',
-    icon: 'git-compare-outline' as const,
-    color: '#fb923c',
-  },
-  {
-    name: 'Estuche doble',
-    category: 'PROTECCIÓN',
-    description: 'Protege y lleva tus raquetas y pelotas.',
-    price: '$39.900',
-    icon: 'briefcase-outline' as const,
-    color: '#f472b6',
-  },
-  {
-    name: 'Kit de entrenamiento',
-    category: 'KITS',
-    description: 'Raqueta recreativa y pelotas para empezar.',
-    price: '$69.900',
-    icon: 'fitness-outline' as const,
-    color: '#38bdf8',
-  },
-];
+import { useToast } from '../context/ToastContext';
+import {
+  DEFAULT_PRODUCTS,
+  WHATSAPP_TIENDA,
+} from '../constants/tienda';
 
 export default function StoreScreen() {
   const router = useRouter();
+  const { showWarning } = useToast();
 
+  const productos = DEFAULT_PRODUCTS;
+
+  // WhatsApp
   const handleOrder = async (productName?: string) => {
     const message = productName
-      ? `Hola, quiero consultar por ${productName}.`
-      : 'Hola, quiero consultar por los productos de la tienda.';
-    const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+      ? `Hola, quiero consultar por ${productName} de la tienda Smash Match.`
+      : 'Hola, quiero consultar por los productos de la tienda Smash Match.';
+    const whatsappUrl = `https://wa.me/${WHATSAPP_TIENDA}?text=${encodeURIComponent(message)}`;
 
     try {
       await Linking.openURL(whatsappUrl);
     } catch {
-      Alert.alert('No se pudo abrir WhatsApp', 'Intenta nuevamente o escribe al +57 310 029 3724.');
+      showWarning(
+        `Intenta nuevamente o escribe al +${WHATSAPP_TIENDA}.`,
+        'No se pudo abrir WhatsApp'
+      );
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
+
+      {/* Círculos de luz ambiental */}
+      <View style={styles.glowTop} pointerEvents="none" />
+      <View style={styles.glowBottom} pointerEvents="none" />
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.75}>
-          <Ionicons name="arrow-back" size={20} color={SmashTheme.colors.onSurface} />
-          <Text style={styles.backButtonText}>Volver</Text>
-        </TouchableOpacity>
+        {/* Barra de Navegación Superior */}
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            activeOpacity={0.75}>
+            <Ionicons name="arrow-back" size={20} color={SmashTheme.colors.onSurface} />
+            <Text style={styles.backButtonText}>Volver</Text>
+          </TouchableOpacity>
+        </View>
 
+        {/* Encabezado Principal */}
         <View style={styles.heading}>
           <View style={styles.headingIcon}>
-            <Ionicons name="basket" size={25} color={SmashTheme.colors.primary} />
+            <Ionicons name="basket" size={28} color={SmashTheme.colors.primary} />
           </View>
-          <Text style={styles.title}>Tienda</Text>
+          <Text style={styles.title}>Tienda Smash</Text>
           <Text style={styles.subtitle}>
-            Equípate para llevar tu juego al siguiente nivel.
+            Equípate con lo mejor para tus entrenamientos y torneos oficiales.
           </Text>
         </View>
 
+        {/* Aviso Informativo con HUD styling */}
         <View style={styles.notice}>
-          <Ionicons name="information-circle-outline" size={19} color={SmashTheme.colors.secondary} />
+          <Ionicons name="shield-checkmark-outline" size={19} color={SmashTheme.colors.primary} />
           <Text style={styles.noticeText}>
-            Productos y precios de ejemplo. Consulta disponibilidad al hacer tu pedido.
+            Equipamiento de alta calidad garantizada. Consulta detalles y disponibilidad directa por WhatsApp.
           </Text>
         </View>
 
+        {/* Grilla de Productos (Modo Catálogo: Solo lectura y consulta) */}
         <View style={styles.productGrid}>
-          {products.map((product) => (
-            <View key={product.name} style={styles.productCard}>
-              <View style={[styles.productArtwork, { backgroundColor: `${product.color}18` }]}>
-                <Ionicons name={product.icon} size={38} color={product.color} />
-                {product.badge ? (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{product.badge}</Text>
-                  </View>
-                ) : null}
+          {productos.map((product) => {
+            const productColor = product.color || SmashTheme.colors.primary;
+            return (
+              <View key={product.id} style={styles.productCard}>
+                {/* Contenedor de la Foto o Arte */}
+                <View style={styles.productArtwork}>
+                  {product.fotoUrl ? (
+                    <Image
+                      source={{ uri: product.fotoUrl }}
+                      style={styles.productImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.artworkFallback, { backgroundColor: `${productColor}15` }]}>
+                      <Ionicons name="tennisball-outline" size={42} color={productColor} />
+                    </View>
+                  )}
+
+                  {/* Badge destacado (ej: MÁS VENDIDO) */}
+                  {product.badge ? (
+                    <View style={[styles.badge, { backgroundColor: productColor }]}>
+                      <Text style={styles.badgeText}>{product.badge}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Detalles del Producto */}
+                <View style={styles.productDetails}>
+                  <Text style={[styles.category, { color: productColor }]}>
+                    {product.category}
+                  </Text>
+                  <Text style={styles.productName} numberOfLines={2}>
+                    {product.name}
+                  </Text>
+                  <Text style={styles.description} numberOfLines={3}>
+                    {product.description}
+                  </Text>
+                  <Text style={styles.price}>{product.price}</Text>
+
+                  {/* Botón Consultar por WhatsApp */}
+                  <TouchableOpacity
+                    style={styles.orderButton}
+                    onPress={() => handleOrder(product.name)}
+                    activeOpacity={0.8}>
+                    <Ionicons name="logo-whatsapp" size={16} color={SmashTheme.colors.onPrimary} />
+                    <Text style={styles.orderButtonText}>Consultar</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              <View style={styles.productDetails}>
-                <Text style={[styles.category, { color: product.color }]}>{product.category}</Text>
-                <Text style={styles.productName}>{product.name}</Text>
-                <Text style={styles.description}>{product.description}</Text>
-                <Text style={styles.price}>{product.price} COP</Text>
-                <TouchableOpacity
-                  style={styles.orderButton}
-                  onPress={() => handleOrder(product.name)}
-                  activeOpacity={0.8}>
-                  <Ionicons name="logo-whatsapp" size={17} color={SmashTheme.colors.onPrimary} />
-                  <Text style={styles.orderButtonText}>Consultar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
+        {/* Tarjeta WhatsApp Footer */}
         <View style={styles.whatsappCard}>
           <View style={styles.whatsappIcon}>
-            <Ionicons name="logo-whatsapp" size={25} color="#25D366" />
+            <Ionicons name="logo-whatsapp" size={26} color="#25D366" />
           </View>
           <View style={styles.whatsappCopy}>
-            <Text style={styles.whatsappTitle}>Pedidos por WhatsApp</Text>
+            <Text style={styles.whatsappTitle}>Atención Personalizada</Text>
             <Text style={styles.whatsappDescription}>
-              Escríbenos para realizar tu pedido o consultar disponibilidad.
+              ¿Buscas una referencia especial? Escríbenos directamente por WhatsApp.
             </Text>
-            <Text style={styles.whatsappNumber}>+57 310 029 3724</Text>
+            <Text style={styles.whatsappNumber}>+{WHATSAPP_TIENDA}</Text>
           </View>
           <TouchableOpacity
             style={styles.whatsappButton}
             onPress={() => handleOrder()}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Hacer pedido por WhatsApp al +57 310 029 3724">
+            activeOpacity={0.8}>
             <Text style={styles.whatsappButtonText}>Escribir</Text>
-            <Ionicons name="arrow-forward" size={16} color={SmashTheme.colors.onPrimary} />
+            <Ionicons name="arrow-forward" size={15} color={SmashTheme.colors.onPrimary} />
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -174,14 +168,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: SmashTheme.colors.surface,
   },
+  glowTop: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: SmashTheme.colors.primary,
+    opacity: 0.05,
+  },
+  glowBottom: {
+    position: 'absolute',
+    bottom: -60,
+    left: -60,
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: SmashTheme.colors.secondary,
+    opacity: 0.04,
+  },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 36,
+    paddingBottom: 40,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   backButton: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -190,41 +209,46 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: SmashTheme.colors.onSurface,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   heading: {
     alignItems: 'center',
-    paddingTop: 18,
-    paddingBottom: 22,
+    paddingTop: 10,
+    paddingBottom: 16,
   },
   headingIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 54,
+    height: 54,
+    borderRadius: 18,
     backgroundColor: 'rgba(195, 244, 0, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(195, 244, 0, 0.25)',
   },
   title: {
     color: SmashTheme.colors.onSurface,
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '900',
+    letterSpacing: 0.3,
   },
   subtitle: {
     color: SmashTheme.colors.onSurfaceVariant,
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 5,
+    paddingHorizontal: 16,
+    lineHeight: 18,
   },
   notice: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: 10,
     backgroundColor: SmashTheme.colors.surfaceContainerLow,
     borderWidth: 1,
-    borderColor: SmashTheme.colors.cardBorder,
-    borderRadius: 12,
+    borderColor: 'rgba(195, 244, 0, 0.2)',
+    borderRadius: 14,
     padding: 12,
     marginBottom: 18,
   },
@@ -232,7 +256,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: SmashTheme.colors.onSurfaceVariant,
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 17,
   },
   productGrid: {
     flexDirection: 'row',
@@ -246,55 +270,71 @@ const styles = StyleSheet.create({
     backgroundColor: SmashTheme.colors.surfaceContainerLow,
     borderWidth: 1,
     borderColor: SmashTheme.colors.cardBorder,
-    borderRadius: 16,
+    borderRadius: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
   },
   productArtwork: {
-    height: 116,
+    height: 126,
+    width: '100%',
+    backgroundColor: SmashTheme.colors.surfaceContainerHighest,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
+  },
+  artworkFallback: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
   badge: {
     position: 'absolute',
-    top: 9,
+    top: 8,
     left: 8,
-    backgroundColor: SmashTheme.colors.primary,
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    zIndex: 2,
   },
   badgeText: {
     color: SmashTheme.colors.onPrimary,
-    fontSize: 8,
+    fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.3,
   },
   productDetails: {
-    padding: 11,
+    padding: 12,
   },
   category: {
     fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    marginBottom: 5,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    marginBottom: 4,
   },
   productName: {
     color: SmashTheme.colors.onSurface,
     fontSize: 14,
     fontWeight: '800',
-    minHeight: 34,
+    minHeight: 36,
   },
   description: {
     color: SmashTheme.colors.onSurfaceVariant,
     fontSize: 11,
     lineHeight: 16,
-    minHeight: 48,
-    marginTop: 5,
+    minHeight: 46,
+    marginTop: 4,
   },
   price: {
-    color: SmashTheme.colors.onSurface,
+    color: SmashTheme.colors.primary,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '900',
     marginTop: 8,
     marginBottom: 10,
   },
@@ -304,11 +344,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: SmashTheme.colors.primary,
-    borderRadius: 9,
+    backgroundColor: SmashTheme.colors.surfaceContainerHighest,
+    borderWidth: 1,
+    borderColor: 'rgba(195, 244, 0, 0.3)',
+    borderRadius: 10,
   },
   orderButtonText: {
-    color: SmashTheme.colors.onPrimary,
+    color: SmashTheme.colors.primary,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -319,9 +361,9 @@ const styles = StyleSheet.create({
     backgroundColor: SmashTheme.colors.surfaceContainer,
     borderWidth: 1,
     borderColor: 'rgba(37, 211, 102, 0.3)',
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 14,
-    marginTop: 20,
+    marginTop: 22,
   },
   whatsappIcon: {
     width: 44,
@@ -343,21 +385,21 @@ const styles = StyleSheet.create({
     color: SmashTheme.colors.onSurfaceVariant,
     fontSize: 11,
     lineHeight: 16,
-    marginTop: 3,
+    marginTop: 2,
   },
   whatsappNumber: {
     color: '#25D366',
     fontSize: 13,
     fontWeight: '800',
-    marginTop: 5,
+    marginTop: 4,
   },
   whatsappButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: SmashTheme.colors.primary,
-    borderRadius: 9,
-    paddingHorizontal: 10,
+    borderRadius: 10,
+    paddingHorizontal: 11,
     paddingVertical: 9,
   },
   whatsappButtonText: {
